@@ -106,6 +106,8 @@ float4x4 GetInstanceMatrix(FVertexFactoryInput Input)
 	return float4x4(A, B, C, D);
 }
 
+STRONG_TYPE Buffer<uint> InstanceBoneOffsets;
+
 #define FBoneMatrix float3x4
 
 // The bone matrix buffer stored as 4x3 (3 float4 behind each other), all chunks of a skeletal mesh in one, each skeletal mesh has it's own buffer
@@ -160,8 +162,9 @@ float3 UnpackedPosition( FVertexFactoryInput Input )
 		return float3(Input.Position.xyz);
 }
 
-FBoneMatrix GetBoneMatrix(int Index)
+FBoneMatrix GetBoneMatrix(FVertexFactoryInput Input, int _Index)
 {
+	int Index = InstanceBoneOffsets[Input.InstanceId] + _Index;
 	float4 A = BoneMatrices[Index * 3];
 	float4 B = BoneMatrices[Index * 3 + 1];
 	float4 C = BoneMatrices[Index * 3 + 2];
@@ -170,10 +173,10 @@ FBoneMatrix GetBoneMatrix(int Index)
 
 FBoneMatrix CalcBoneMatrix( FVertexFactoryInput Input )
 {
-	FBoneMatrix BoneMatrix = Input.BlendWeights.x * GetBoneMatrix(Input.BlendIndices.x);
-	BoneMatrix += Input.BlendWeights.y * GetBoneMatrix(Input.BlendIndices.y);
-	BoneMatrix += Input.BlendWeights.z * GetBoneMatrix(Input.BlendIndices.z);
-	BoneMatrix += Input.BlendWeights.w * GetBoneMatrix(Input.BlendIndices.w);
+	FBoneMatrix BoneMatrix = Input.BlendWeights.x * GetBoneMatrix(Input, Input.BlendIndices.x);
+	BoneMatrix += Input.BlendWeights.y * GetBoneMatrix(Input, Input.BlendIndices.y);
+	BoneMatrix += Input.BlendWeights.z * GetBoneMatrix(Input, Input.BlendIndices.z);
+	BoneMatrix += Input.BlendWeights.w * GetBoneMatrix(Input, Input.BlendIndices.w);
 	return BoneMatrix;
 }
 

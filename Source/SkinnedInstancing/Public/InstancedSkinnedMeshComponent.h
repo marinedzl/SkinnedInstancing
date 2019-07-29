@@ -10,20 +10,26 @@ struct FInstancedSkinnedMeshInstanceData
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY(EditAnywhere, Category = Instances)
+	int BonePalette;
+
+	UPROPERTY(EditAnywhere, Category = Instances)
 	FMatrix Transform;
 
 	FInstancedSkinnedMeshInstanceData()
-		: Transform(FMatrix::Identity)
+		: BonePalette(0)
+		, Transform(FMatrix::Identity)
 	{
 	}
 
 	FInstancedSkinnedMeshInstanceData(const FMatrix& InTransform)
-		: Transform(InTransform)
+		: BonePalette(0)
+		, Transform(InTransform)
 	{
 	}
 
 	friend FArchive& operator<<(FArchive& Ar, FInstancedSkinnedMeshInstanceData& InstanceData)
 	{
+		Ar << InstanceData.BonePalette;
 		Ar << InstanceData.Transform;
 		return Ar;
 	}
@@ -65,7 +71,7 @@ protected:
 
 private:
 	/** Internal version of AddInstance */
-	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& InstanceTransform);
+	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& InstanceTransform, int Palette);
 
 public:
 	/** Array of instances, bulk serialized. */
@@ -86,7 +92,7 @@ public:
 public:
 	/** Add an instance to this component. Transform is given in local space of this component. */
 	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
-	virtual int32 AddInstance(const FTransform& InstanceTransform);
+	virtual int32 AddInstance(const FTransform& InstanceTransform, int Palette);
 
 private:
 	FBoneContainer BoneContainer;

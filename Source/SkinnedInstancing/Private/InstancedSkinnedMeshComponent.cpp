@@ -9,6 +9,8 @@
 #pragma optimize( "", off )
 namespace
 {
+	const int BonePaletteNum = 8;
+
 	struct FVertexFactoryBuffers
 	{
 		FStaticMeshVertexBuffers* StaticVertexBuffers = nullptr;
@@ -67,7 +69,8 @@ namespace
 			{
 				ensure(IsInRenderingThread());
 				BoneBuffer.SafeRelease();
-				InstanceBuffer.SafeRelease();
+				InstanceTransformBuffer.SafeRelease();
+				InstanceBoneOffsetBuffer.SafeRelease();
 			}
 
 			const FVertexBufferAndSRV& GetBoneBufferForReading() const
@@ -75,62 +78,73 @@ namespace
 				return BoneBuffer;
 			}
 
-			const FVertexBufferAndSRV& GetInstanceBufferForReading() const
+			const FVertexBufferAndSRV& GetInstanceTransformBufferForReading() const
 			{
-				return InstanceBuffer;
+				return InstanceTransformBuffer;
 			}
 
-			bool UpdateBoneData(const TArray<FMatrix>& ReferenceToLocalMatrices, const TArray<FBoneIndexType>& BoneMap)
+			const FVertexBufferAndSRV& GetInstanceBoneOffsetBufferForReading() const
 			{
-				const uint32 NumBones = BoneMap.Num();
-				uint32 NumVectors = NumBones * 3;
-				uint32 VectorArraySize = NumVectors * sizeof(FVector4);
+				return InstanceBoneOffsetBuffer;
+			}
+
+			bool UpdateBoneData(const TArray<FMatrix>& ReferenceToLocalMatrices, int PaletteStride, const TArray<FBoneIndexType>& BoneMap)
+			{
+				uint32 BufferSize = ReferenceToLocalMatrices.Num() * 3 * sizeof(FVector4);
 
 				if (!BoneBuffer.IsValid())
 				{
-					uint32 BufferSize = VectorArraySize;
 					FRHIResourceCreateInfo CreateInfo;
 					BoneBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
 					BoneBuffer.VertexBufferSRV = RHICreateShaderResourceView(BoneBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
 				}
+				
+				FMatrix3x4* ChunkMatrices = (FMatrix3x4*)RHILockVertexBuffer(BoneBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
 
-				if (BoneBuffer.IsValid() && NumBones)
+				for (size_t i = 0; i < BonePaletteNum; i++)
 				{
-					FMatrix3x4* ChunkMatrices = (FMatrix3x4*)RHILockVertexBuffer(BoneBuffer.VertexBufferRHI, 0, VectorArraySize, RLM_WriteOnly);
+					const uint32 NumBones = BoneMap.Num();
 
-					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
-					for (uint32 BoneIdx = 0; BoneIdx < NumBones; BoneIdx++)
+					if (BoneBuffer.IsValid() && NumBones)
 					{
-						const FBoneIndexType RefToLocalIdx = BoneMap[BoneIdx];
-						FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + RefToLocalIdx + PreFetchStride);
-						FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + RefToLocalIdx + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
+						const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
+						for (uint32 BoneIdx = 0; BoneIdx < NumBones; BoneIdx++)
+						{
+							const FBoneIndexType RefToLocalIdx = BoneMap[BoneIdx];
 
-						FMatrix3x4& BoneMat = ChunkMatrices[BoneIdx];
-						const FMatrix& RefToLocal = ReferenceToLocalMatrices[RefToLocalIdx];
-						RefToLocal.To3x4MatrixTranspose((float*)BoneMat.M);
+							int SrcIndex = PaletteStride * i + RefToLocalIdx;
+							int DstIndex = PaletteStride * i + BoneIdx;
+
+							FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + SrcIndex + PreFetchStride);
+							FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + SrcIndex + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
+
+							FMatrix3x4& BoneMat = ChunkMatrices[DstIndex];
+							const FMatrix& RefToLocal = ReferenceToLocalMatrices[SrcIndex];
+							RefToLocal.To3x4MatrixTranspose((float*)BoneMat.M);
+						}
 					}
-
-					RHIUnlockVertexBuffer(BoneBuffer.VertexBufferRHI);
 				}
+
+				RHIUnlockVertexBuffer(BoneBuffer.VertexBufferRHI);
 
 				return true;
 			}
 
-			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceTransforms)
+			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceTransforms, int PaletteStride)
 			{
 				const uint32 NumInstances = InstanceTransforms.Num();
 				uint32 BufferSize = NumInstances * 4 * sizeof(FVector4);
 
-				if (!InstanceBuffer.IsValid())
+				if (!InstanceTransformBuffer.IsValid())
 				{
 					FRHIResourceCreateInfo CreateInfo;
-					InstanceBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
-					InstanceBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
+					InstanceTransformBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					InstanceTransformBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceTransformBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
 				}
 
-				if (InstanceBuffer.IsValid())
+				if (InstanceTransformBuffer.IsValid())
 				{
-					FMatrix* ChunkMatrices = (FMatrix*)RHILockVertexBuffer(InstanceBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+					FMatrix* ChunkMatrices = (FMatrix*)RHILockVertexBuffer(InstanceTransformBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
 
 					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
 					for (uint32 i = 0; i < NumInstances; i++)
@@ -141,14 +155,39 @@ namespace
 						ChunkMatrices[i] = InstanceTransforms[i].Transform;
 					}
 
-					RHIUnlockVertexBuffer(InstanceBuffer.VertexBufferRHI);
+					RHIUnlockVertexBuffer(InstanceTransformBuffer.VertexBufferRHI);
+				}
+
+				BufferSize = NumInstances * sizeof(UINT);
+				if (!InstanceBoneOffsetBuffer.IsValid())
+				{
+					FRHIResourceCreateInfo CreateInfo;
+					InstanceBoneOffsetBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					InstanceBoneOffsetBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceBoneOffsetBuffer.VertexBufferRHI, sizeof(UINT), PF_R32_UINT);
+				}
+
+				if (InstanceBoneOffsetBuffer.IsValid())
+				{
+					UINT* Data = (UINT*)RHILockVertexBuffer(InstanceBoneOffsetBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+
+					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
+					for (uint32 i = 0; i < NumInstances; i++)
+					{
+						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride);
+						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
+
+						Data[i] = InstanceTransforms[i].BonePalette * PaletteStride;
+					}
+
+					RHIUnlockVertexBuffer(InstanceBoneOffsetBuffer.VertexBufferRHI);
 				}
 
 				return true;
 			}
 		private:
 			FVertexBufferAndSRV BoneBuffer;
-			FVertexBufferAndSRV InstanceBuffer;
+			FVertexBufferAndSRV InstanceTransformBuffer;
+			FVertexBufferAndSRV InstanceBoneOffsetBuffer;
 		};
 
 		const FShaderDataType& GetShaderData() const
@@ -272,12 +311,14 @@ namespace
 		{
 			BoneMatrices.Bind(ParameterMap, TEXT("BoneMatrices"));
 			InstanceMatrices.Bind(ParameterMap, TEXT("InstanceMatrices"));
+			InstanceBoneOffsets.Bind(ParameterMap, TEXT("InstanceBoneOffsets"));
 		}
 
 		virtual void Serialize(FArchive& Ar) override
 		{
 			Ar << BoneMatrices;
 			Ar << InstanceMatrices;
+			Ar << InstanceBoneOffsets;
 		}
 
 		virtual void GetElementShaderBindings(
@@ -301,8 +342,14 @@ namespace
 
 			if (InstanceMatrices.IsBound())
 			{
-				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetInstanceBufferForReading().VertexBufferSRV;
+				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetInstanceTransformBufferForReading().VertexBufferSRV;
 				ShaderBindings.Add(InstanceMatrices, CurrentData);
+			}
+
+			if (InstanceBoneOffsets.IsBound())
+			{
+				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetInstanceBoneOffsetBufferForReading().VertexBufferSRV;
+				ShaderBindings.Add(InstanceBoneOffsets, CurrentData);
 			}
 		}
 
@@ -311,6 +358,7 @@ namespace
 	private:
 		FShaderResourceParameter BoneMatrices;
 		FShaderResourceParameter InstanceMatrices;
+		FShaderResourceParameter InstanceBoneOffsets;
 	};
 
 	FVertexFactoryShaderParameters* FGPUSkinVertexFactory::ConstructShaderParameters(EShaderFrequency ShaderFrequency)
@@ -598,8 +646,9 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 	{
 		const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
 		FGPUSkinVertexFactory* VertexFactory = MeshObject->GetSkinVertexFactory(LODIndex, SectionIndex);
-		VertexFactory->GetShaderData().UpdateBoneData(Component->BoneTransforms, Section.BoneMap);
-		VertexFactory->GetShaderData().UpdateInstanceData(Component->PerInstanceSMData);
+		int PaletteStride = Component->ComponentSpaceTransforms.Num();
+		VertexFactory->GetShaderData().UpdateBoneData(Component->BoneTransforms, PaletteStride, Section.BoneMap);
+		VertexFactory->GetShaderData().UpdateInstanceData(Component->PerInstanceSMData, PaletteStride);
 	}
 
 	for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); SectionIndex++)
@@ -805,7 +854,8 @@ void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
 	}
 }
 
-int32 UInstancedSkinnedMeshComponent::AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData * InNewInstanceData, const FTransform & InstanceTransform)
+int32 UInstancedSkinnedMeshComponent::AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData * InNewInstanceData, 
+	const FTransform & InstanceTransform, int Palette)
 {
 	FInstancedSkinnedMeshInstanceData* NewInstanceData = InNewInstanceData;
 
@@ -815,15 +865,16 @@ int32 UInstancedSkinnedMeshComponent::AddInstanceInternal(int32 InstanceIndex, F
 	}
 
 	NewInstanceData->Transform = InstanceTransform.ToMatrixWithScale();
+	NewInstanceData->BonePalette = Palette;
 
 	MarkRenderStateDirty();
 
 	return InstanceIndex;
 }
 
-int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & InstanceTransform)
+int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & InstanceTransform, int Palette)
 {
-	return AddInstanceInternal(PerInstanceSMData.Num(), nullptr, InstanceTransform);
+	return AddInstanceInternal(PerInstanceSMData.Num(), nullptr, InstanceTransform, Palette);
 }
 
 void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
@@ -841,7 +892,7 @@ void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick T
 			BoneContainer.InitializeTo(RequiredBones, FCurveEvaluationOption(), *SkeletalMesh->Skeleton);
 
 			int NumBones = SkeletalMesh->RefSkeleton.GetNum();
-			BoneTransforms.AddUninitialized(NumBones);
+			BoneTransforms.AddUninitialized(NumBones * 8);
 			ComponentSpaceTransforms.AddUninitialized(NumBones);
 		}
 	}
@@ -849,43 +900,49 @@ void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick T
 	if (AnimSequence && SkeletalMesh)
 	{
 		CurrentAnimTime += DeltaTime;
-		CurrentAnimTime = FMath::Fmod(CurrentAnimTime, AnimSequence->SequenceLength);
+		 
+		float TimeOffset = AnimSequence->SequenceLength / BonePaletteNum;
+
 		FCompactPose OutPose;
 		FBlendedCurve OutCurve;
 
 		OutPose.SetBoneContainer(&BoneContainer);
-		OutPose.ResetToRefPose();
 
-		AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(CurrentAnimTime));
-
-		auto LocalTransform = OutPose.GetBones();
-		const FTransform* LocalTransformsData = LocalTransform.GetData();
-		FTransform* ComponentSpaceData = ComponentSpaceTransforms.GetData();
-
-		check(LocalTransform.Num() == ComponentSpaceTransforms.Num());
-
-		ComponentSpaceTransforms[0] = LocalTransform[0];
-
-		for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
+		for (size_t i = 0; i < BonePaletteNum; i++)
 		{
-			// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
-			const int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
-			FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
-			FPlatformMisc::Prefetch(ParentSpaceBase);
+			float Time = FMath::Fmod(CurrentAnimTime + TimeOffset * i, AnimSequence->SequenceLength);
+			AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(Time));
 
-			FTransform* SpaceBase = ComponentSpaceData + BoneIndex;
+			auto& LocalTransform = OutPose.GetBones();
+			const FTransform* LocalTransformsData = LocalTransform.GetData();
+			FTransform* ComponentSpaceData = ComponentSpaceTransforms.GetData();
 
-			FTransform::Multiply(SpaceBase, LocalTransformsData + BoneIndex, ParentSpaceBase);
+			check(LocalTransform.Num() == ComponentSpaceTransforms.Num());
 
-			SpaceBase->NormalizeRotation();
+			ComponentSpaceTransforms[0] = LocalTransform[0];
 
-			checkSlow(SpaceBase->IsRotationNormalized());
-			checkSlow(!SpaceBase->ContainsNaN());
-		}
+			for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
+			{
+				// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
+				const int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
+				FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
+				FPlatformMisc::Prefetch(ParentSpaceBase);
 
-		for (int32 BoneIndex = 0; BoneIndex < ComponentSpaceTransforms.Num(); BoneIndex++)
-		{
-			BoneTransforms[BoneIndex] = SkeletalMesh->RefBasesInvMatrix[BoneIndex] * ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
+				FTransform* SpaceBase = ComponentSpaceData + BoneIndex;
+
+				FTransform::Multiply(SpaceBase, LocalTransformsData + BoneIndex, ParentSpaceBase);
+
+				SpaceBase->NormalizeRotation();
+
+				checkSlow(SpaceBase->IsRotationNormalized());
+				checkSlow(!SpaceBase->ContainsNaN());
+			}
+
+			int NumBones = ComponentSpaceTransforms.Num();
+			for (int32 BoneIndex = 0; BoneIndex < ComponentSpaceTransforms.Num(); BoneIndex++)
+			{
+				BoneTransforms[NumBones * i + BoneIndex] = SkeletalMesh->RefBasesInvMatrix[BoneIndex] * ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
+			}
 		}
 	}
 }
