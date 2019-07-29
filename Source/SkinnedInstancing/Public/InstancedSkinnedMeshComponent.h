@@ -76,6 +76,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mesh")
 	class USkeletalMesh* SkeletalMesh;
 
+	/** The skeletal mesh used by this component. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
+	class UAnimSequence* AnimSequence;
+
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;
 
@@ -83,6 +87,12 @@ public:
 	/** Add an instance to this component. Transform is given in local space of this component. */
 	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
 	virtual int32 AddInstance(const FTransform& InstanceTransform);
+
+private:
+	FBoneContainer BoneContainer;
+	float CurrentAnimTime;
+	TArray<FTransform> ComponentSpaceTransforms;
+	TArray<FMatrix> BoneTransforms;
 
 private:
 	friend class FInstancedSkinnedMeshSceneProxy;

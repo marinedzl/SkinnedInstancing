@@ -2,6 +2,8 @@
 #include "PrimitiveSceneProxy.h"
 #include "SkeletalMeshTypes.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "Animation/AnimSequence.h"
+#include "BonePose.h"
 #include "MeshDrawShaderBindings.h"
 
 #pragma optimize( "", off )
@@ -563,9 +565,6 @@ private:
 	class USkeletalMesh* SkeletalMesh;
 	class FInstancedSkinnedMeshObject* MeshObject;
 	FSkeletalMeshRenderData* SkeletalMeshRenderData;
-
-	//dynamic data
-	TArray<FMatrix> ReferenceToLocal;
 };
 
 FInstancedSkinnedMeshSceneProxy::FInstancedSkinnedMeshSceneProxy(UInstancedSkinnedMeshComponent * Component,
@@ -579,11 +578,6 @@ FInstancedSkinnedMeshSceneProxy::FInstancedSkinnedMeshSceneProxy(UInstancedSkinn
 	, MeshObject(MeshObject)
 	, SkeletalMeshRenderData(SkeletalMesh->GetResourceForRendering())
 {
-	ReferenceToLocal.AddUninitialized(SkeletalMesh->RefBasesInvMatrix.Num());
-	for (int i = 0; i < ReferenceToLocal.Num(); i++)
-	{
-		ReferenceToLocal[i] = FMatrix::Identity;
-	}
 }
 
 FInstancedSkinnedMeshSceneProxy::~FInstancedSkinnedMeshSceneProxy()
@@ -604,7 +598,7 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 	{
 		const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
 		FGPUSkinVertexFactory* VertexFactory = MeshObject->GetSkinVertexFactory(LODIndex, SectionIndex);
-		VertexFactory->GetShaderData().UpdateBoneData(ReferenceToLocal, Section.BoneMap);
+		VertexFactory->GetShaderData().UpdateBoneData(Component->BoneTransforms, Section.BoneMap);
 		VertexFactory->GetShaderData().UpdateInstanceData(Component->PerInstanceSMData);
 	}
 
@@ -709,6 +703,8 @@ UInstancedSkinnedMeshComponent::UInstancedSkinnedMeshComponent(const FObjectInit
 	bAutoActivate = true;
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+
+	CurrentAnimTime = 0;
 }
 
 FPrimitiveSceneProxy* UInstancedSkinnedMeshComponent::CreateSceneProxy()
@@ -834,6 +830,64 @@ void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick T
 {
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (SkeletalMesh)
+	{
+		if (!BoneContainer.IsValid())
+		{
+			int LODIndex = 0;
+			FSkeletalMeshLODRenderData& LODData = SkeletalMesh->GetResourceForRendering()->LODRenderData[LODIndex];
+			TArray<FBoneIndexType>& RequiredBones = LODData.RequiredBones;
+			BoneContainer.InitializeTo(RequiredBones, FCurveEvaluationOption(), *SkeletalMesh->Skeleton);
+
+			int NumBones = SkeletalMesh->RefSkeleton.GetNum();
+			BoneTransforms.AddUninitialized(NumBones);
+			ComponentSpaceTransforms.AddUninitialized(NumBones);
+		}
+	}
+
+	if (AnimSequence && SkeletalMesh)
+	{
+		CurrentAnimTime += DeltaTime;
+		CurrentAnimTime = FMath::Fmod(CurrentAnimTime, AnimSequence->SequenceLength);
+		FCompactPose OutPose;
+		FBlendedCurve OutCurve;
+
+		OutPose.SetBoneContainer(&BoneContainer);
+		OutPose.ResetToRefPose();
+
+		AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(CurrentAnimTime));
+
+		auto LocalTransform = OutPose.GetBones();
+		const FTransform* LocalTransformsData = LocalTransform.GetData();
+		FTransform* ComponentSpaceData = ComponentSpaceTransforms.GetData();
+
+		check(LocalTransform.Num() == ComponentSpaceTransforms.Num());
+
+		ComponentSpaceTransforms[0] = LocalTransform[0];
+
+		for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
+		{
+			// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
+			const int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
+			FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
+			FPlatformMisc::Prefetch(ParentSpaceBase);
+
+			FTransform* SpaceBase = ComponentSpaceData + BoneIndex;
+
+			FTransform::Multiply(SpaceBase, LocalTransformsData + BoneIndex, ParentSpaceBase);
+
+			SpaceBase->NormalizeRotation();
+
+			checkSlow(SpaceBase->IsRotationNormalized());
+			checkSlow(!SpaceBase->ContainsNaN());
+		}
+
+		for (int32 BoneIndex = 0; BoneIndex < ComponentSpaceTransforms.Num(); BoneIndex++)
+		{
+			BoneTransforms[BoneIndex] = SkeletalMesh->RefBasesInvMatrix[BoneIndex] * ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
+		}
+	}
 }
 
 #pragma optimize( "", on )
