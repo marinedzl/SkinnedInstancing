@@ -36,6 +36,10 @@ struct FVertexFactoryInput
 
 	/** Per vertex color */
 	float4 Color : ATTRIBUTE13;
+	
+#if FEATURE_LEVEL >= FEATURE_LEVEL_ES3_1
+	uint InstanceId	: SV_InstanceID;
+#endif
 };
 
 struct FVertexFactoryInterpolantsVSToPS
@@ -90,6 +94,18 @@ FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVS
 	return Result;
 }
 
+STRONG_TYPE Buffer<float4> InstanceMatrices;
+
+float4x4 GetInstanceMatrix(FVertexFactoryInput Input)
+{
+	int Index = Input.InstanceId;
+	float4 A = InstanceMatrices[Index * 4];
+	float4 B = InstanceMatrices[Index * 4 + 1];
+	float4 C = InstanceMatrices[Index * 4 + 2];
+	float4 D = InstanceMatrices[Index * 4 + 3];
+	return float4x4(A, B, C, D);
+}
+
 #define FBoneMatrix float3x4
 
 // The bone matrix buffer stored as 4x3 (3 float4 behind each other), all chunks of a skeletal mesh in one, each skeletal mesh has it's own buffer
@@ -100,6 +116,9 @@ struct FVertexFactoryIntermediates
 {
 	// Blend Matrix (used for position/tangents)
 	FBoneMatrix BlendMatrix;
+	
+	// Instance Matrix (used for position/tangents)
+	float4x4 InstanceMatrix;
 
 	// Unpacked position
 	float3 UnpackedPosition;
@@ -197,6 +216,7 @@ FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput In
 	
 	Intermediates.UnpackedPosition = UnpackedPosition(Input);
 	Intermediates.BlendMatrix = CalcBoneMatrix( Input );
+	Intermediates.InstanceMatrix = GetInstanceMatrix(Input);
 
 	// Fill TangentToLocal
 	Intermediates.TangentToLocal = SkinTangents(Input, Intermediates);
@@ -209,7 +229,10 @@ FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput In
 
 float4 CalcWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
 {
-	return TransformLocalToTranslatedWorld(SkinPosition(Input, Intermediates));
+	float3 LocalPosition = SkinPosition(Input, Intermediates);
+	float4x4 LocalToWorld = Intermediates.InstanceMatrix;
+	float3 RotatedPosition = LocalToWorld[0].xyz * LocalPosition.xxx + LocalToWorld[1].xyz * LocalPosition.yyy + LocalToWorld[2].xyz * LocalPosition.zzz;
+	return float4(RotatedPosition + (LocalToWorld[3].xyz + ResolvedView.PreViewTranslation.xyz),1);
 }
 
 /**

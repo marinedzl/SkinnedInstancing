@@ -4,6 +4,31 @@
 #include "Components/MeshComponent.h"
 #include "InstancedSkinnedMeshComponent.generated.h"
 
+USTRUCT()
+struct FInstancedSkinnedMeshInstanceData
+{
+	GENERATED_USTRUCT_BODY()
+
+	UPROPERTY(EditAnywhere, Category = Instances)
+	FMatrix Transform;
+
+	FInstancedSkinnedMeshInstanceData()
+		: Transform(FMatrix::Identity)
+	{
+	}
+
+	FInstancedSkinnedMeshInstanceData(const FMatrix& InTransform)
+		: Transform(InTransform)
+	{
+	}
+
+	friend FArchive& operator<<(FArchive& Ar, FInstancedSkinnedMeshInstanceData& InstanceData)
+	{
+		Ar << InstanceData.Transform;
+		return Ar;
+	}
+};
+
 UCLASS(hidecategories = (Object, LOD), meta = (BlueprintSpawnableComponent), ClassGroup = Rendering)
 class ENGINE_API UInstancedSkinnedMeshComponent : public UMeshComponent
 {
@@ -20,7 +45,6 @@ private:
 	//~ End UMeshComponent Interface.
 
 	//~ Begin UObject Interface
-	virtual void PostLoad() override;
 	//~ End UObject Interface.
 
 	//~ Begin USceneComponent Interface.
@@ -39,7 +63,14 @@ protected:
 	virtual UObject const* AdditionalStatObject() const override { return SkeletalMesh; }
 	//~ End UActorComponent Interface
 
+private:
+	/** Internal version of AddInstance */
+	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& InstanceTransform);
+
 public:
+	/** Array of instances, bulk serialized. */
+	UPROPERTY(EditAnywhere, SkipSerialization, DisplayName = "Instances", Category = Instances, meta = (MakeEditWidget = true, EditFixedOrder))
+	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
 
 	/** The skeletal mesh used by this component. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mesh")
@@ -47,6 +78,11 @@ public:
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;
+
+public:
+	/** Add an instance to this component. Transform is given in local space of this component. */
+	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
+	virtual int32 AddInstance(const FTransform& InstanceTransform);
 
 private:
 	friend class FInstancedSkinnedMeshSceneProxy;

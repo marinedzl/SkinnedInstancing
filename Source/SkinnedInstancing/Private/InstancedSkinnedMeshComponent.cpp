@@ -61,15 +61,21 @@ namespace
 
 		struct FShaderDataType
 		{
-			void ReleaseBoneData()
+			void Release()
 			{
 				ensure(IsInRenderingThread());
 				BoneBuffer.SafeRelease();
+				InstanceBuffer.SafeRelease();
 			}
 
 			const FVertexBufferAndSRV& GetBoneBufferForReading() const
 			{
 				return BoneBuffer;
+			}
+
+			const FVertexBufferAndSRV& GetInstanceBufferForReading() const
+			{
+				return InstanceBuffer;
 			}
 
 			bool UpdateBoneData(const TArray<FMatrix>& ReferenceToLocalMatrices, const TArray<FBoneIndexType>& BoneMap)
@@ -107,8 +113,40 @@ namespace
 
 				return true;
 			}
+
+			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceTransforms)
+			{
+				const uint32 NumInstances = InstanceTransforms.Num();
+				uint32 BufferSize = NumInstances * 4 * sizeof(FVector4);
+
+				if (!InstanceBuffer.IsValid())
+				{
+					FRHIResourceCreateInfo CreateInfo;
+					InstanceBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					InstanceBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
+				}
+
+				if (InstanceBuffer.IsValid())
+				{
+					FMatrix* ChunkMatrices = (FMatrix*)RHILockVertexBuffer(InstanceBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+
+					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
+					for (uint32 i = 0; i < NumInstances; i++)
+					{
+						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride);
+						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
+
+						ChunkMatrices[i] = InstanceTransforms[i].Transform;
+					}
+
+					RHIUnlockVertexBuffer(InstanceBuffer.VertexBufferRHI);
+				}
+
+				return true;
+			}
 		private:
 			FVertexBufferAndSRV BoneBuffer;
+			FVertexBufferAndSRV InstanceBuffer;
 		};
 
 		const FShaderDataType& GetShaderData() const
@@ -222,7 +260,7 @@ namespace
 	void FGPUSkinVertexFactory::ReleaseDynamicRHI()
 	{
 		FVertexFactory::ReleaseDynamicRHI();
-		ShaderData.ReleaseBoneData();
+		ShaderData.Release();
 	}
 
 	class FGPUSkinVertexFactoryShaderParameters : public FVertexFactoryShaderParameters
@@ -231,11 +269,13 @@ namespace
 		virtual void Bind(const FShaderParameterMap& ParameterMap) override
 		{
 			BoneMatrices.Bind(ParameterMap, TEXT("BoneMatrices"));
+			InstanceMatrices.Bind(ParameterMap, TEXT("InstanceMatrices"));
 		}
 
 		virtual void Serialize(FArchive& Ar) override
 		{
 			Ar << BoneMatrices;
+			Ar << InstanceMatrices;
 		}
 
 		virtual void GetElementShaderBindings(
@@ -256,12 +296,19 @@ namespace
 				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetBoneBufferForReading().VertexBufferSRV;
 				ShaderBindings.Add(BoneMatrices, CurrentData);
 			}
+
+			if (InstanceMatrices.IsBound())
+			{
+				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetInstanceBufferForReading().VertexBufferSRV;
+				ShaderBindings.Add(InstanceMatrices, CurrentData);
+			}
 		}
 
 		virtual uint32 GetSize() const override { return sizeof(*this); }
 
 	private:
 		FShaderResourceParameter BoneMatrices;
+		FShaderResourceParameter InstanceMatrices;
 	};
 
 	FVertexFactoryShaderParameters* FGPUSkinVertexFactory::ConstructShaderParameters(EShaderFrequency ShaderFrequency)
@@ -545,6 +592,9 @@ FInstancedSkinnedMeshSceneProxy::~FInstancedSkinnedMeshSceneProxy()
 
 void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views, const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
 {
+	if (Component->PerInstanceSMData.Num() <= 0)
+		return;
+
 	const int32 LODIndex = 0;
 	check(LODIndex < SkeletalMeshRenderData->LODRenderData.Num());
 
@@ -555,6 +605,7 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 		const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
 		FGPUSkinVertexFactory* VertexFactory = MeshObject->GetSkinVertexFactory(LODIndex, SectionIndex);
 		VertexFactory->GetShaderData().UpdateBoneData(ReferenceToLocal, Section.BoneMap);
+		VertexFactory->GetShaderData().UpdateInstanceData(Component->PerInstanceSMData);
 	}
 
 	for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); SectionIndex++)
@@ -602,6 +653,7 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 				BatchElement.MaxVertexIndex = LODData.GetNumVertices() - 1;
 				BatchElement.PrimitiveUniformBuffer = GetUniformBuffer();
 				BatchElement.NumPrimitives = LODData.RenderSections[SectionIndex].NumTriangles;
+				BatchElement.NumInstances = Component->PerInstanceSMData.Num();
 
 				if (!Mesh.VertexFactory)
 				{
@@ -683,14 +735,26 @@ int32 UInstancedSkinnedMeshComponent::GetNumMaterials() const
 	return 0;
 }
 
-void UInstancedSkinnedMeshComponent::PostLoad()
+FBoxSphereBounds UInstancedSkinnedMeshComponent::CalcBounds(const FTransform & BoundTransform) const
 {
-	Super::PostLoad();
-}
+	if (SkeletalMesh && PerInstanceSMData.Num() > 0)
+	{
+		FMatrix BoundTransformMatrix = BoundTransform.ToMatrixWithScale();
 
-FBoxSphereBounds UInstancedSkinnedMeshComponent::CalcBounds(const FTransform & LocalToWorld) const
-{
-	return Super::CalcBounds(LocalToWorld);
+		FBoxSphereBounds RenderBounds = SkeletalMesh->GetBounds();
+		FBoxSphereBounds NewBounds = RenderBounds.TransformBy(PerInstanceSMData[0].Transform * BoundTransformMatrix);
+
+		for (int32 InstanceIndex = 1; InstanceIndex < PerInstanceSMData.Num(); InstanceIndex++)
+		{
+			NewBounds = NewBounds + RenderBounds.TransformBy(PerInstanceSMData[InstanceIndex].Transform * BoundTransformMatrix);
+		}
+
+		return NewBounds;
+	}
+	else
+	{
+		return FBoxSphereBounds(BoundTransform.GetLocation(), FVector::ZeroVector, 0.f);
+	}
 }
 
 void UInstancedSkinnedMeshComponent::OnRegister()
@@ -743,6 +807,27 @@ void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
 		BeginCleanup(MeshObject);
 		MeshObject = nullptr;
 	}
+}
+
+int32 UInstancedSkinnedMeshComponent::AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData * InNewInstanceData, const FTransform & InstanceTransform)
+{
+	FInstancedSkinnedMeshInstanceData* NewInstanceData = InNewInstanceData;
+
+	if (NewInstanceData == nullptr)
+	{
+		NewInstanceData = new(PerInstanceSMData) FInstancedSkinnedMeshInstanceData();
+	}
+
+	NewInstanceData->Transform = InstanceTransform.ToMatrixWithScale();
+
+	MarkRenderStateDirty();
+
+	return InstanceIndex;
+}
+
+int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & InstanceTransform)
+{
+	return AddInstanceInternal(PerInstanceSMData.Num(), nullptr, InstanceTransform);
 }
 
 void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
