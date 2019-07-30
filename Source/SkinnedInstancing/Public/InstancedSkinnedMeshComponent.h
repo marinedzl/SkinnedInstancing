@@ -10,26 +10,26 @@ struct FInstancedSkinnedMeshInstanceData
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY(EditAnywhere, Category = Instances)
-	int BonePalette;
+	int AnimationPalette;
 
 	UPROPERTY(EditAnywhere, Category = Instances)
 	FMatrix Transform;
 
 	FInstancedSkinnedMeshInstanceData()
-		: BonePalette(0)
+		: AnimationPalette(0)
 		, Transform(FMatrix::Identity)
 	{
 	}
 
 	FInstancedSkinnedMeshInstanceData(const FMatrix& InTransform)
-		: BonePalette(0)
+		: AnimationPalette(0)
 		, Transform(InTransform)
 	{
 	}
 
 	friend FArchive& operator<<(FArchive& Ar, FInstancedSkinnedMeshInstanceData& InstanceData)
 	{
-		Ar << InstanceData.BonePalette;
+		Ar << InstanceData.AnimationPalette;
 		Ar << InstanceData.Transform;
 		return Ar;
 	}
@@ -74,17 +74,22 @@ private:
 	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& InstanceTransform, int Palette);
 
 public:
-	/** Array of instances, bulk serialized. */
-	UPROPERTY(EditAnywhere, SkipSerialization, DisplayName = "Instances", Category = Instances, meta = (MakeEditWidget = true, EditFixedOrder))
-	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
 
 	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mesh")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
 	class USkeletalMesh* SkeletalMesh;
 
 	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
 	class UAnimSequence* AnimSequence;
+
+	/** The skeletal mesh used by this component. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	int AnimationPaletteNum;
+
+	/** Array of instances, bulk serialized. */
+	UPROPERTY(EditAnywhere, SkipSerialization, DisplayName = "Instances", Category = Instances, meta = (MakeEditWidget = true, EditFixedOrder))
+	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;
