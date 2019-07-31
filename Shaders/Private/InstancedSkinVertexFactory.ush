@@ -106,7 +106,24 @@ float4x4 GetInstanceMatrix(FVertexFactoryInput Input)
 	return float4x4(A, B, C, D);
 }
 
-STRONG_TYPE Buffer<uint> InstanceBoneOffsets;
+struct InstanceAnimation
+{
+	int PrevFrame;
+	int NextFrame;
+	float FrameLerp;
+};
+
+STRONG_TYPE Buffer<uint> InstanceAnimations;
+
+InstanceAnimation GetInstanceAnimation(FVertexFactoryInput Input)
+{
+	InstanceAnimation Data;
+	int Index = Input.InstanceId;
+	Data.PrevFrame = InstanceAnimations[Index * 3 + 0];
+	Data.NextFrame = InstanceAnimations[Index * 3 + 1];
+	Data.FrameLerp = InstanceAnimations[Index * 3 + 2] * 0.001f;
+	return Data;
+}
 
 #define FBoneMatrix float3x4
 
@@ -166,14 +183,26 @@ float3 UnpackedPosition( FVertexFactoryInput Input )
 {
 		return float3(Input.Position.xyz);
 }
-
+/**
 FBoneMatrix GetBoneMatrix(FVertexFactoryInput Input, int _Index)
 {
-	int Index = InstanceBoneOffsets[Input.InstanceId] + _Index;
+	InstanceAnimation Animation = GetInstanceAnimation(Input);
+	int Index = Animation.PrevFrame + _Index;
 	float4 A = BoneMatrices[Index * 3];
 	float4 B = BoneMatrices[Index * 3 + 1];
 	float4 C = BoneMatrices[Index * 3 + 2];
 	return FBoneMatrix(A,B,C);
+}
+*/
+
+FBoneMatrix GetBoneMatrix(FVertexFactoryInput Input, int _Index)
+{
+	InstanceAnimation Animation = GetInstanceAnimation(Input);
+	int Index = Animation.PrevFrame + _Index;
+	FBoneMatrix Prev = FBoneMatrix(BoneMatrices[Index * 3], BoneMatrices[Index * 3 + 1], BoneMatrices[Index * 3 + 2]);
+	Index = Animation.NextFrame + _Index;
+	FBoneMatrix Next = FBoneMatrix(BoneMatrices[Index * 3], BoneMatrices[Index * 3 + 1], BoneMatrices[Index * 3 + 2]);
+	return lerp(Prev, Next, Animation.FrameLerp);
 }
 
 FBoneMatrix CalcBoneMatrix( FVertexFactoryInput Input )

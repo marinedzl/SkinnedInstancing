@@ -10,26 +10,25 @@ struct FInstancedSkinnedMeshInstanceData
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY(EditAnywhere, Category = Instances)
-	int AnimationPalette;
-
-	UPROPERTY(EditAnywhere, Category = Instances)
 	FMatrix Transform;
 
-	FInstancedSkinnedMeshInstanceData()
-		: AnimationPalette(0)
-		, Transform(FMatrix::Identity)
-	{
-	}
+	int PrevFrame;
+	int NextFrame;
+	int FrameLerp;
 
-	FInstancedSkinnedMeshInstanceData(const FMatrix& InTransform)
-		: AnimationPalette(0)
-		, Transform(InTransform)
+	float Time;
+
+	FInstancedSkinnedMeshInstanceData()
+		: Transform(FMatrix::Identity)
+		, PrevFrame(0)
+		, NextFrame(0)
+		, FrameLerp(0)
+		, Time(0)
 	{
 	}
 
 	friend FArchive& operator<<(FArchive& Ar, FInstancedSkinnedMeshInstanceData& InstanceData)
 	{
-		Ar << InstanceData.AnimationPalette;
 		Ar << InstanceData.Transform;
 		return Ar;
 	}
@@ -71,7 +70,7 @@ protected:
 
 private:
 	/** Internal version of AddInstance */
-	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& InstanceTransform, int Palette);
+	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& Transform);
 
 public:
 
@@ -83,10 +82,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
 	class UAnimSequence* AnimSequence;
 
-	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	int AnimationPaletteNum;
-
 	/** Array of instances, bulk serialized. */
 	UPROPERTY(EditAnywhere, SkipSerialization, DisplayName = "Instances", Category = Instances, meta = (MakeEditWidget = true, EditFixedOrder))
 	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
@@ -95,15 +90,11 @@ public:
 	class FInstancedSkinnedMeshObject* MeshObject;
 
 public:
-	/** Add an instance to this component. Transform is given in local space of this component. */
 	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
-	virtual int32 AddInstance(const FTransform& InstanceTransform, int Palette);
+	virtual int32 AddInstance(const FTransform& Transform);
 
-private:
-	FBoneContainer BoneContainer;
-	float CurrentAnimTime;
-	TArray<FTransform> ComponentSpaceTransforms;
-	TArray<FMatrix> BoneTransforms;
+	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
+	virtual void SetInstance(int32 Index, const FTransform& Transform, float Time);
 
 private:
 	friend class FInstancedSkinnedMeshSceneProxy;
