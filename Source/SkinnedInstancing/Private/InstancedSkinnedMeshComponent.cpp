@@ -608,49 +608,62 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 		const TArray<FBoneIndexType>& BoneMap = Section.BoneMap;
 
 		TArray<FMatrix> PoseData;
-		PoseData.AddUninitialized(BoneMap.Num() * NumFrames);
 
-		for (int FrameIndex = 0; FrameIndex < NumFrames; FrameIndex++)
+		if (!ensureMsgf(Section.MaxBoneInfluences <= MAX_INFLUENCES_PER_STREAM, 
+			TEXT("FInstancedSkinnedMeshObject::UpdateBoneDataDeferred with invalid MaxBoneInfluences. Owner:%s LODIndex:%d UseMaterialIndex:%d"),
+			*SkeletalMesh->GetName(), LODIndex, Section.MaterialIndex))
 		{
-			float Time = FrameIndex * Interval;
-			AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(Time));
+			int DataCount = BoneMap.Num() * NumFrames;
+			PoseData.AddUninitialized(DataCount);
+			for (int i = 0; i < DataCount; i++)
+				PoseData[i].SetIdentity();
+		}
+		else
+		{
+			PoseData.AddUninitialized(BoneMap.Num() * NumFrames);
 
-			int NumBones = SkeletalMesh->RefSkeleton.GetNum();
-			TArray<FTransform> ComponentSpaceTransforms;
-
-			ComponentSpaceTransforms.AddUninitialized(NumBones);
-
-			auto& LocalTransform = OutPose.GetBones();
-
-			check(LocalTransform.Num() == ComponentSpaceTransforms.Num());
-
-			const FTransform* LocalTransformsData = LocalTransform.GetData();
-			FTransform* ComponentSpaceData = ComponentSpaceTransforms.GetData();
-
-			ComponentSpaceTransforms[0] = LocalTransform[0];
-
-			for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
+			for (int FrameIndex = 0; FrameIndex < NumFrames; FrameIndex++)
 			{
-				// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
-				const int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
-				FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
-				FPlatformMisc::Prefetch(ParentSpaceBase);
+				float Time = FrameIndex * Interval;
+				AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(Time));
 
-				FTransform* SpaceBase = ComponentSpaceData + BoneIndex;
+				int NumBones = SkeletalMesh->RefSkeleton.GetRawBoneNum();
+				TArray<FTransform> ComponentSpaceTransforms;
 
-				FTransform::Multiply(SpaceBase, LocalTransformsData + BoneIndex, ParentSpaceBase);
+				ComponentSpaceTransforms.AddUninitialized(NumBones);
 
-				SpaceBase->NormalizeRotation();
+				auto& LocalTransform = OutPose.GetBones();
 
-				checkSlow(SpaceBase->IsRotationNormalized());
-				checkSlow(!SpaceBase->ContainsNaN());
-			}
+				check(LocalTransform.Num() == ComponentSpaceTransforms.Num());
 
-			for (int BoneIndex = 0; BoneIndex < BoneMap.Num(); BoneIndex++)
-			{
-				const FBoneIndexType RefIndex = BoneMap[BoneIndex]; // Indices of bones in the USkeletalMesh::RefSkeleton array
-				int PoseDataOffset = BoneMap.Num() * FrameIndex + BoneIndex;
-				PoseData[PoseDataOffset] = SkeletalMesh->RefBasesInvMatrix[RefIndex] * ComponentSpaceTransforms[RefIndex].ToMatrixWithScale();
+				const FTransform* LocalTransformsData = LocalTransform.GetData();
+				FTransform* ComponentSpaceData = ComponentSpaceTransforms.GetData();
+
+				ComponentSpaceTransforms[0] = LocalTransform[0];
+
+				for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
+				{
+					// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
+					const int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
+					FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
+					FPlatformMisc::Prefetch(ParentSpaceBase);
+
+					FTransform* SpaceBase = ComponentSpaceData + BoneIndex;
+
+					FTransform::Multiply(SpaceBase, LocalTransformsData + BoneIndex, ParentSpaceBase);
+
+					SpaceBase->NormalizeRotation();
+
+					checkSlow(SpaceBase->IsRotationNormalized());
+					checkSlow(!SpaceBase->ContainsNaN());
+				}
+
+				for (int BoneIndex = 0; BoneIndex < BoneMap.Num(); BoneIndex++)
+				{
+					const FBoneIndexType RefIndex = BoneMap[BoneIndex]; // Indices of bones in the USkeletalMesh::RefSkeleton array
+					int PoseDataOffset = BoneMap.Num() * FrameIndex + BoneIndex;
+					PoseData[PoseDataOffset] = SkeletalMesh->RefBasesInvMatrix[RefIndex] * ComponentSpaceTransforms[RefIndex].ToMatrixWithScale();
+				}
 			}
 		}
 
