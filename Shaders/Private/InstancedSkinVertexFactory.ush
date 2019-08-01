@@ -94,41 +94,59 @@ FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVS
 	return Result;
 }
 
+#define FBoneMatrix float3x4
+
+STRONG_TYPE Buffer<float4> BoneMatrices0;
+STRONG_TYPE Buffer<float4> BoneMatrices1;
+STRONG_TYPE Buffer<float4> BoneMatrices2;
+
 STRONG_TYPE Buffer<float4> InstanceMatrices;
 
-float4x4 GetInstanceMatrix(FVertexFactoryInput Input)
+float4x4 GetInstanceMatrix(int InstanceId)
 {
-	int Index = Input.InstanceId;
-	float4 A = InstanceMatrices[Index * 4];
-	float4 B = InstanceMatrices[Index * 4 + 1];
-	float4 C = InstanceMatrices[Index * 4 + 2];
-	float4 D = InstanceMatrices[Index * 4 + 3];
+	float4 A = InstanceMatrices[InstanceId * 4];
+	float4 B = InstanceMatrices[InstanceId * 4 + 1];
+	float4 C = InstanceMatrices[InstanceId * 4 + 2];
+	float4 D = InstanceMatrices[InstanceId * 4 + 3];
 	return float4x4(A, B, C, D);
 }
 
-struct InstanceAnimation
-{
-	int PrevFrame;
-	int NextFrame;
-	float FrameLerp;
-};
-
 STRONG_TYPE Buffer<uint> InstanceAnimations;
 
-InstanceAnimation GetInstanceAnimation(FVertexFactoryInput Input)
+FBoneMatrix GetBoneMatrixBySequence(int Sequence, int _Offset)
 {
-	InstanceAnimation Data;
-	int Index = Input.InstanceId;
-	Data.PrevFrame = InstanceAnimations[Index * 3 + 0];
-	Data.NextFrame = InstanceAnimations[Index * 3 + 1];
-	Data.FrameLerp = InstanceAnimations[Index * 3 + 2] * 0.001f;
-	return Data;
+	int Offset = _Offset * 3; 
+	switch(Sequence)
+	{
+	case 1:
+		return FBoneMatrix(BoneMatrices1[Offset], BoneMatrices1[Offset + 1], BoneMatrices1[Offset + 2]);
+	case 2:
+		return FBoneMatrix(BoneMatrices2[Offset], BoneMatrices2[Offset + 1], BoneMatrices2[Offset + 2]);
+	}
+	return FBoneMatrix(BoneMatrices0[Offset], BoneMatrices0[Offset + 1], BoneMatrices0[Offset + 2]);
 }
 
-#define FBoneMatrix float3x4
+FBoneMatrix GetBoneMatrixByInstanceAnimation(int InstanceId, int Layer, int BoneId)
+{
+	int Index = InstanceId * 10 + Layer * 5;
+	int Sequence = InstanceAnimations[Index + 0];
+	int PrevFrame = InstanceAnimations[Index + 1];
+	int NextFrame = InstanceAnimations[Index + 2];
+	float FrameLerp = InstanceAnimations[Index + 3] * 0.001f;
+	float BlendWeight = InstanceAnimations[Index + 4] * 0.001f;
+	
+	FBoneMatrix Prev = GetBoneMatrixBySequence(Sequence, PrevFrame + BoneId);
+	FBoneMatrix Next = GetBoneMatrixBySequence(Sequence, NextFrame + BoneId);
+	
+	return lerp(Prev, Next, FrameLerp) * BlendWeight;
+}
 
-// The bone matrix buffer stored as 4x3 (3 float4 behind each other), all chunks of a skeletal mesh in one, each skeletal mesh has it's own buffer
-STRONG_TYPE Buffer<float4> BoneMatrices;
+FBoneMatrix GetBoneMatrix(int InstanceId, int BoneId)
+{
+	FBoneMatrix M0 = GetBoneMatrixByInstanceAnimation(InstanceId, 0, BoneId);
+	FBoneMatrix M1 = GetBoneMatrixByInstanceAnimation(InstanceId, 1, BoneId);
+	return M0 + M1;
+}
 
 // Cache data to avoid multiple calculation 
 struct FVertexFactoryIntermediates
@@ -183,34 +201,14 @@ float3 UnpackedPosition( FVertexFactoryInput Input )
 {
 		return float3(Input.Position.xyz);
 }
-/**
-FBoneMatrix GetBoneMatrix(FVertexFactoryInput Input, int _Index)
-{
-	InstanceAnimation Animation = GetInstanceAnimation(Input);
-	int Index = Animation.PrevFrame + _Index;
-	float4 A = BoneMatrices[Index * 3];
-	float4 B = BoneMatrices[Index * 3 + 1];
-	float4 C = BoneMatrices[Index * 3 + 2];
-	return FBoneMatrix(A,B,C);
-}
-*/
-
-FBoneMatrix GetBoneMatrix(FVertexFactoryInput Input, int _Index)
-{
-	InstanceAnimation Animation = GetInstanceAnimation(Input);
-	int Index = Animation.PrevFrame + _Index;
-	FBoneMatrix Prev = FBoneMatrix(BoneMatrices[Index * 3], BoneMatrices[Index * 3 + 1], BoneMatrices[Index * 3 + 2]);
-	Index = Animation.NextFrame + _Index;
-	FBoneMatrix Next = FBoneMatrix(BoneMatrices[Index * 3], BoneMatrices[Index * 3 + 1], BoneMatrices[Index * 3 + 2]);
-	return lerp(Prev, Next, Animation.FrameLerp);
-}
 
 FBoneMatrix CalcBoneMatrix( FVertexFactoryInput Input )
 {
-	FBoneMatrix BoneMatrix = Input.BlendWeights.x * GetBoneMatrix(Input, Input.BlendIndices.x);
-	BoneMatrix += Input.BlendWeights.y * GetBoneMatrix(Input, Input.BlendIndices.y);
-	BoneMatrix += Input.BlendWeights.z * GetBoneMatrix(Input, Input.BlendIndices.z);
-	BoneMatrix += Input.BlendWeights.w * GetBoneMatrix(Input, Input.BlendIndices.w);
+	int InstanceId = Input.InstanceId;
+	FBoneMatrix BoneMatrix = Input.BlendWeights.x * GetBoneMatrix(InstanceId, Input.BlendIndices.x);
+	BoneMatrix += Input.BlendWeights.y * GetBoneMatrix(InstanceId, Input.BlendIndices.y);
+	BoneMatrix += Input.BlendWeights.z * GetBoneMatrix(InstanceId, Input.BlendIndices.z);
+	BoneMatrix += Input.BlendWeights.w * GetBoneMatrix(InstanceId, Input.BlendIndices.w);
 	return BoneMatrix;
 }
 
@@ -253,7 +251,7 @@ FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput In
 	
 	Intermediates.UnpackedPosition = UnpackedPosition(Input);
 	Intermediates.BlendMatrix = CalcBoneMatrix( Input );
-	Intermediates.InstanceMatrix = GetInstanceMatrix(Input);
+	Intermediates.InstanceMatrix = GetInstanceMatrix(Input.InstanceId);
 
 	// Fill TangentToLocal
 	Intermediates.TangentToLocal = SkinTangents(Input, Intermediates);

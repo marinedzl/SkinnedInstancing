@@ -4,34 +4,18 @@
 #include "Components/MeshComponent.h"
 #include "InstancedSkinnedMeshComponent.generated.h"
 
-USTRUCT()
 struct FInstancedSkinnedMeshInstanceData
 {
-	GENERATED_USTRUCT_BODY()
-
-	UPROPERTY(EditAnywhere, Category = Instances)
+	struct FAnimData
+	{
+		int Sequence;
+		int PrevFrame;
+		int NextFrame;
+		float FrameLerp;
+		float BlendWeight;
+	};
 	FMatrix Transform;
-
-	int PrevFrame;
-	int NextFrame;
-	int FrameLerp;
-
-	float Time;
-
-	FInstancedSkinnedMeshInstanceData()
-		: Transform(FMatrix::Identity)
-		, PrevFrame(0)
-		, NextFrame(0)
-		, FrameLerp(0)
-		, Time(0)
-	{
-	}
-
-	friend FArchive& operator<<(FArchive& Ar, FInstancedSkinnedMeshInstanceData& InstanceData)
-	{
-		Ar << InstanceData.Transform;
-		return Ar;
-	}
+	FAnimData AnimDatas[2];
 };
 
 UCLASS(hidecategories = (Object, LOD), meta = (BlueprintSpawnableComponent), ClassGroup = Rendering)
@@ -69,8 +53,6 @@ protected:
 	//~ End UActorComponent Interface
 
 private:
-	/** Internal version of AddInstance */
-	int32 AddInstanceInternal(int32 InstanceIndex, FInstancedSkinnedMeshInstanceData* InNewInstanceData, const FTransform& Transform);
 
 public:
 
@@ -80,21 +62,24 @@ public:
 
 	/** The skeletal mesh used by this component. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	class UAnimSequence* AnimSequence;
+	class UAnimSequence* AnimSequence0;
 
-	/** Array of instances, bulk serialized. */
-	UPROPERTY(EditAnywhere, SkipSerialization, DisplayName = "Instances", Category = Instances, meta = (MakeEditWidget = true, EditFixedOrder))
-	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
+	/** The skeletal mesh used by this component. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	class UAnimSequence* AnimSequence1;
+
+	/** The skeletal mesh used by this component. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	class UAnimSequence* AnimSequence2;
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;
 
+	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
+
 public:
 	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
 	virtual int32 AddInstance(const FTransform& Transform);
-
-	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
-	virtual void SetInstance(int32 Index, const FTransform& Transform, float Time);
 
 private:
 	friend class FInstancedSkinnedMeshSceneProxy;
