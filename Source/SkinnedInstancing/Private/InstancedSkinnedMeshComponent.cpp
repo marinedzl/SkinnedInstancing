@@ -1008,39 +1008,6 @@ void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick T
 {
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	/*
-	if (AnimSequence0 && SkeletalMesh)
-	{
-		int NumFrames = AnimSequence0->GetNumberOfFrames();
-		float SequenceLength = AnimSequence0->SequenceLength;
-		float Interval = (NumFrames > 1) ? (SequenceLength / (NumFrames - 1)) : MINIMUM_ANIMATION_LENGTH;
-
-		for (int InstanceIndex = 0; InstanceIndex < PerInstanceSMData.Num(); InstanceIndex++)
-		{
-			auto& Instance = PerInstanceSMData[InstanceIndex];
-
-			// Test Start
-			Instance.AnimTime += DeltaTime;
-			// Test End
-
-			float Time = FMath::Fmod(Instance.AnimTime, SequenceLength);
-			int Frame = Time / Interval;
-			float Lerp = Time - Frame * Interval;
-
-			Instance.AnimDatas[0].Sequence = 0;
-			Instance.AnimDatas[0].PrevFrame = FMath::Clamp(Frame, 0, NumFrames - 1);
-			Instance.AnimDatas[0].NextFrame = FMath::Clamp(Frame + 1, 0, NumFrames - 1);
-			Instance.AnimDatas[0].FrameLerp = FMath::Clamp(Lerp, 0.0f, 1.0f);
-			Instance.AnimDatas[0].BlendWeight = 1;
-
-			Instance.AnimDatas[1].Sequence = 0;
-			Instance.AnimDatas[1].PrevFrame = 0;
-			Instance.AnimDatas[1].NextFrame = 0;
-			Instance.AnimDatas[1].FrameLerp = 0;
-			Instance.AnimDatas[1].BlendWeight = 0;
-		}
-	}
-	*/
 }
 
 #pragma optimize( "", on )
