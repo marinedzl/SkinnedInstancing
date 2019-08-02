@@ -1004,6 +1004,14 @@ int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & Transform)
 	return InstanceIndex;
 }
 
+UAnimSequence * UInstancedSkinnedMeshComponent::GetSequence(int Id)
+{
+	if (Id > InstancedAnimCount)
+		return nullptr;
+	UAnimSequence* AnimSequences[] = { AnimSequence0, AnimSequence1, AnimSequence2, };
+	return AnimSequences[Id];
+}
+
 void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
 {
 	// Tick ActorComponent first.

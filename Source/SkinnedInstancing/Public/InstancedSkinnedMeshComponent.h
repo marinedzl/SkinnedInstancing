@@ -52,8 +52,6 @@ protected:
 	virtual UObject const* AdditionalStatObject() const override { return SkeletalMesh; }
 	//~ End UActorComponent Interface
 
-private:
-
 public:
 
 	/** The skeletal mesh used by this component. */
@@ -79,7 +77,10 @@ public:
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
-	virtual int32 AddInstance(const FTransform& Transform);
+	int32 AddInstance(const FTransform& Transform);
+
+	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
+	UAnimSequence* GetSequence(int Id);
 
 private:
 	friend class FInstancedSkinnedMeshSceneProxy;

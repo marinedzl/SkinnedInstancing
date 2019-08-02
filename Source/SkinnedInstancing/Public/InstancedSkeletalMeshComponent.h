@@ -11,13 +11,23 @@ class ENGINE_API UInstancedSkeletalMeshComponent : public USceneComponent
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instances")
 	AActor* InstanceManagerObject;
 
+public:
+	virtual ~UInstancedSkeletalMeshComponent();
+
 	//~ Override Functions
 protected:
 	//~ Begin UActorComponent Interface
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;
 	//~ End UActorComponent Interface
 
+public:
+	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkeletalMesh")
+	void CrossFade(int Sequence, float FadeLength = 0.2f);
+
+public:
+	class FAnimtionPlayer;
+
 private:
 	int InstanceId;
-	float AnimTime;
+	FAnimtionPlayer* AnimtionPlayer;
 };
