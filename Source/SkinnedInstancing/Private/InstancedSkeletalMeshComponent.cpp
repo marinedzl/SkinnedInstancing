@@ -106,8 +106,7 @@ UInstancedSkeletalMeshComponent::UInstancedSkeletalMeshComponent(const FObjectIn
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 
-	InstanceManagerObject = nullptr;
-	InstanceId = -1;
+	InstanceId = 0;
 
 	AnimtionPlayer = new FAnimtionPlayer();
 }
@@ -117,18 +116,42 @@ UInstancedSkeletalMeshComponent::~UInstancedSkeletalMeshComponent()
 	delete AnimtionPlayer;
 }
 
+void UInstancedSkeletalMeshComponent::BeginPlay()
+{
+	Super::BeginPlay();
+}
+
+void UInstancedSkeletalMeshComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (InstanceId > 0 && InstanceManagerObject.IsValid())
+	{
+		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+			);
+		if (InstanceManager)
+		{
+			InstanceManager->RemoveInstance(InstanceId);
+		}
+	}
+}
+
 void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength)
 {
-	UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-		InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
-		);
-	if (InstanceManager)
+	if (InstanceManagerObject.IsValid())
 	{
-		UAnimSequence* AnimSequence = InstanceManager->GetSequence(Sequence);
-		int NumFrames = AnimSequence->GetNumberOfFrames();
-		check(AnimSequence);
-		FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
-		AnimtionPlayer->CrossFade(Seq, true, FadeLength);
+		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+			);
+		if (InstanceManager)
+		{
+			UAnimSequence* AnimSequence = InstanceManager->GetSequence(Sequence);
+			int NumFrames = AnimSequence->GetNumberOfFrames();
+			check(AnimSequence);
+			FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
+			AnimtionPlayer->CrossFade(Seq, true, FadeLength);
+		}
 	}
 }
 
@@ -137,46 +160,44 @@ void UInstancedSkeletalMeshComponent::TickComponent(float DeltaTime, ELevelTick 
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	if (InstanceId <= 0 && InstanceManagerObject.IsValid())
+	{
+		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+			);
+		if (InstanceManager)
+		{
+			InstanceId = InstanceManager->AddInstance(GetComponentTransform());
+		}
+	}
+
 	AnimtionPlayer->Tick(DeltaTime);
 
-	if (InstanceManagerObject)
+	if (InstanceManagerObject.IsValid() && InstanceId > 0)
 	{
-		if (InstanceId < 0)
+		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+			);
+		if (InstanceManager)
 		{
-			UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-				InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
-				);
-			if (InstanceManager)
+			FInstancedSkinnedMeshInstanceData* Instance = InstanceManager->GetInstanceData(InstanceId);
+			check(Instance);
+			Instance->Transform = GetComponentTransform().ToMatrixWithScale();
+
+			GetInstanceDataFromPlayer(Instance->AnimDatas[0], AnimtionPlayer->GetCurrentSeq());
+			GetInstanceDataFromPlayer(Instance->AnimDatas[1], AnimtionPlayer->GetNextSeq());
+
+			float BlendWeight = 1;
+
+			if (AnimtionPlayer->GetCurrentSeq().Id != AnimtionPlayer->GetNextSeq().Id)
 			{
-				InstanceId = InstanceManager->AddInstance(GetComponentTransform());
+				float FadeTime = AnimtionPlayer->GetFadeTime();
+				float FadeLength = FMath::Max(AnimtionPlayer->GetFadeLength(), 0.001f);
+				BlendWeight = FadeTime / FadeLength;
 			}
-		}
 
-		if (InstanceId >= 0)
-		{
-			UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-				InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
-				);
-			if (InstanceManager)
-			{
-				FInstancedSkinnedMeshInstanceData& Instance = InstanceManager->PerInstanceSMData[InstanceId];
-				Instance.Transform = GetComponentTransform().ToMatrixWithScale();
-
-				GetInstanceDataFromPlayer(Instance.AnimDatas[0], AnimtionPlayer->GetCurrentSeq());
-				GetInstanceDataFromPlayer(Instance.AnimDatas[1], AnimtionPlayer->GetNextSeq());
-
-				float BlendWeight = 1;
-
-				if (AnimtionPlayer->GetCurrentSeq().Id != AnimtionPlayer->GetNextSeq().Id)
-				{
-					float FadeTime = AnimtionPlayer->GetFadeTime();
-					float FadeLength = FMath::Max(AnimtionPlayer->GetFadeLength(), 0.001f);
-					BlendWeight = FadeTime / FadeLength;
-				}
-
-				Instance.AnimDatas[0].BlendWeight = BlendWeight;
-				Instance.AnimDatas[1].BlendWeight = 1 - BlendWeight;
-			}
+			Instance->AnimDatas[0].BlendWeight = BlendWeight;
+			Instance->AnimDatas[1].BlendWeight = 1 - BlendWeight;
 		}
 	}
 }

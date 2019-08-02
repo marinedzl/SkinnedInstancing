@@ -73,14 +73,18 @@ public:
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;
 
-	TArray<FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
+private:
+	TMap<int, FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
+	int InstanceIdIncrease;
 
 public:
-	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
 	int32 AddInstance(const FTransform& Transform);
 
-	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkinMesh")
+	void RemoveInstance(int Id);
+	
 	UAnimSequence* GetSequence(int Id);
+
+	FInstancedSkinnedMeshInstanceData* GetInstanceData(int Id);
 
 private:
 	friend class FInstancedSkinnedMeshSceneProxy;

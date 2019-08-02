@@ -9,7 +9,7 @@ class ENGINE_API UInstancedSkeletalMeshComponent : public USceneComponent
 	GENERATED_UCLASS_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instances")
-	AActor* InstanceManagerObject;
+	TWeakObjectPtr<AActor> InstanceManagerObject;
 
 public:
 	virtual ~UInstancedSkeletalMeshComponent();
@@ -17,6 +17,8 @@ public:
 	//~ Override Functions
 protected:
 	//~ Begin UActorComponent Interface
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;
 	//~ End UActorComponent Interface
 

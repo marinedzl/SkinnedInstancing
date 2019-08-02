@@ -125,9 +125,9 @@ namespace
 				return true;
 			}
 
-			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceTransforms, int NumBones)
+			bool UpdateInstanceData(const TMap<int, FInstancedSkinnedMeshInstanceData>& PerInstanceSMData, int NumBones)
 			{
-				const uint32 NumInstances = InstanceTransforms.Num();
+				const uint32 NumInstances = PerInstanceSMData.Num();
 				uint32 BufferSize = NumInstances * 4 * sizeof(FVector4);
 
 				if (!InstanceTransformBuffer.IsValid())
@@ -142,12 +142,11 @@ namespace
 					FMatrix* LockedBuffer = (FMatrix*)RHILockVertexBuffer(InstanceTransformBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
 
 					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
-					for (uint32 i = 0; i < NumInstances; i++)
-					{
-						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride);
-						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
 
-						LockedBuffer[i] = InstanceTransforms[i].Transform;
+					int i = 0;
+					for (auto& Elem : PerInstanceSMData)
+					{
+						LockedBuffer[i++] = Elem.Value.Transform;
 					}
 
 					RHIUnlockVertexBuffer(InstanceTransformBuffer.VertexBufferRHI);
@@ -167,16 +166,16 @@ namespace
 					UINT* LockedBuffer = (UINT*)RHILockVertexBuffer(InstanceAnimationBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
 
 					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
-					for (uint32 i = 0; i < NumInstances; i++)
-					{
-						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride);
-						FPlatformMisc::Prefetch(InstanceTransforms.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
 
-						int Offset = i * InstanceDataCount;
+
+					int i = 0;
+					for (auto& Elem : PerInstanceSMData)
+					{
+						int Offset = i++ * InstanceDataCount;
 
 						for (int j = 0; j < 2; j++)
 						{
-							const auto& AnimData = InstanceTransforms[i].AnimDatas[j];
+							const auto& AnimData = Elem.Value.AnimDatas[j];
 							LockedBuffer[Offset++] = AnimData.Sequence;
 							LockedBuffer[Offset++] = AnimData.PrevFrame * NumBones;
 							LockedBuffer[Offset++] = AnimData.NextFrame * NumBones;
@@ -890,6 +889,8 @@ UInstancedSkinnedMeshComponent::UInstancedSkinnedMeshComponent(const FObjectInit
 	bAutoActivate = true;
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+
+	InstanceIdIncrease = 0;
 }
 
 FPrimitiveSceneProxy* UInstancedSkinnedMeshComponent::CreateSceneProxy()
@@ -923,11 +924,11 @@ FBoxSphereBounds UInstancedSkinnedMeshComponent::CalcBounds(const FTransform & B
 		FMatrix BoundTransformMatrix = BoundTransform.ToMatrixWithScale();
 
 		FBoxSphereBounds RenderBounds = SkeletalMesh->GetBounds();
-		FBoxSphereBounds NewBounds = RenderBounds.TransformBy(PerInstanceSMData[0].Transform * BoundTransformMatrix);
+		FBoxSphereBounds NewBounds = RenderBounds.TransformBy(BoundTransformMatrix);
 
-		for (int32 InstanceIndex = 1; InstanceIndex < PerInstanceSMData.Num(); InstanceIndex++)
+		for (auto& Elem : PerInstanceSMData)
 		{
-			NewBounds = NewBounds + RenderBounds.TransformBy(PerInstanceSMData[InstanceIndex].Transform * BoundTransformMatrix);
+			NewBounds = NewBounds + RenderBounds.TransformBy(Elem.Value.Transform * BoundTransformMatrix);
 		}
 
 		return NewBounds;
@@ -992,16 +993,24 @@ void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
 
 int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & Transform)
 {
-	int InstanceIndex = PerInstanceSMData.Num();
-	FInstancedSkinnedMeshInstanceData* NewInstanceData = new(PerInstanceSMData) FInstancedSkinnedMeshInstanceData();
-	NewInstanceData->Transform = Transform.ToMatrixWithScale();
+	int Id = ++InstanceIdIncrease;
+	FInstancedSkinnedMeshInstanceData NewInstanceData;
 
-	NewInstanceData->AnimDatas[0] = { 0, 0, 0, 0, 1 };
-	NewInstanceData->AnimDatas[1] = { 0, 0, 0, 0, 0 };
+	NewInstanceData.Transform = Transform.ToMatrixWithScale();
+	NewInstanceData.AnimDatas[0] = { 0, 0, 0, 0, 1 };
+	NewInstanceData.AnimDatas[1] = { 0, 0, 0, 0, 0 };
+
+	PerInstanceSMData.Add(Id, NewInstanceData);
 
 	MarkRenderStateDirty();
 
-	return InstanceIndex;
+	return Id;
+}
+
+void UInstancedSkinnedMeshComponent::RemoveInstance(int Id)
+{
+	PerInstanceSMData.Remove(Id);
+	MarkRenderStateDirty();
 }
 
 UAnimSequence * UInstancedSkinnedMeshComponent::GetSequence(int Id)
@@ -1010,6 +1019,11 @@ UAnimSequence * UInstancedSkinnedMeshComponent::GetSequence(int Id)
 		return nullptr;
 	UAnimSequence* AnimSequences[] = { AnimSequence0, AnimSequence1, AnimSequence2, };
 	return AnimSequences[Id];
+}
+
+FInstancedSkinnedMeshInstanceData* UInstancedSkinnedMeshComponent::GetInstanceData(int Id)
+{
+	return PerInstanceSMData.Find(Id);
 }
 
 void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
