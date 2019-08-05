@@ -858,6 +858,18 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 			}
 		}
 	}
+
+	// Draw bounds
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
+	{
+		if (VisibilityMap & (1 << ViewIndex))
+		{
+			// Render bounds
+			RenderBounds(Collector.GetPDI(ViewIndex), ViewFamily.EngineShowFlags, GetBounds(), IsSelected());
+		}
+	}
+#endif
 }
 
 FPrimitiveViewRelevance FInstancedSkinnedMeshSceneProxy::GetViewRelevance(const FSceneView * View) const
@@ -921,14 +933,21 @@ FBoxSphereBounds UInstancedSkinnedMeshComponent::CalcBounds(const FTransform & B
 {
 	if (SkeletalMesh && PerInstanceSMData.Num() > 0)
 	{
-		FMatrix BoundTransformMatrix = BoundTransform.ToMatrixWithScale();
-
 		FBoxSphereBounds RenderBounds = SkeletalMesh->GetBounds();
-		FBoxSphereBounds NewBounds = RenderBounds.TransformBy(BoundTransformMatrix);
+		FBoxSphereBounds NewBounds;
 
+		bool IsFirst = true;
 		for (auto& Elem : PerInstanceSMData)
 		{
-			NewBounds = NewBounds + RenderBounds.TransformBy(Elem.Value.Transform * BoundTransformMatrix);
+			if (IsFirst)
+			{
+				IsFirst = false;
+				NewBounds = RenderBounds.TransformBy(Elem.Value.Transform);
+			}
+			else
+			{
+				NewBounds = NewBounds + RenderBounds.TransformBy(Elem.Value.Transform);
+			}
 		}
 
 		return NewBounds;
@@ -1030,6 +1049,8 @@ void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick T
 {
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	UpdateBounds();
+	MarkRenderTransformDirty();
 }
 
 #pragma optimize( "", on )
