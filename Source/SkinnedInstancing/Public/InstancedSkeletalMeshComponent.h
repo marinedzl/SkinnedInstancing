@@ -24,7 +24,7 @@ protected:
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkeletalMesh")
-	void CrossFade(int Sequence, float FadeLength = 0.2f);
+	void CrossFade(int Sequence, float FadeLength, bool Loop);
 
 public:
 	class FAnimtionPlayer;

@@ -23,7 +23,7 @@ public:
 			if (Loop)
 				Time = FMath::Fmod(Time, Length);
 			else
-				Time = FMath::Max(Time, Length);
+				Time = FMath::Min(Time, Length);
 		}
 	};
 
@@ -90,7 +90,7 @@ namespace
 
 		float Time = Seq.Time;
 		int Frame = Time / Interval;
-		float Lerp = Time - Frame * Interval;
+		float Lerp = (Time - Frame * Interval) / Interval;
 
 		Data.Sequence = Seq.Id;
 		Data.PrevFrame = FMath::Clamp(Frame, 0, NumFrames - 1);
@@ -137,7 +137,7 @@ void UInstancedSkeletalMeshComponent::EndPlay(const EEndPlayReason::Type EndPlay
 	}
 }
 
-void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength)
+void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength, bool Loop)
 {
 	if (InstanceManagerObject.IsValid())
 	{
@@ -150,7 +150,7 @@ void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength)
 			int NumFrames = AnimSequence->GetNumberOfFrames();
 			check(AnimSequence);
 			FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
-			AnimtionPlayer->CrossFade(Seq, true, FadeLength);
+			AnimtionPlayer->CrossFade(Seq, Loop, FadeLength);
 		}
 	}
 }
