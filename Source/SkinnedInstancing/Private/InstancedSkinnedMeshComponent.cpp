@@ -9,6 +9,24 @@
 #pragma optimize( "", off )
 namespace
 {
+	static TAutoConsoleVariable<int32> CVarInstancedSkinLimit2BoneInfluences(
+		TEXT("r.InstancedSkin.Limit2BoneInfluences"),
+		0,
+		TEXT("Whether to use 2 bones influence instead of default 4 for GPU skinning. Cannot be changed at runtime."),
+		ECVF_ReadOnly);
+
+	static TAutoConsoleVariable<int32> CVarInstancedSkinDisableAnimationBlend(
+		TEXT("r.InstancedSkin.DisableAnimationBlend"),
+		0,
+		TEXT("Whether to use animation blend. Cannot be changed at runtime."),
+		ECVF_ReadOnly);
+
+	static TAutoConsoleVariable<int32> CVarInstancedSkinDisableFrameLerp(
+		TEXT("r.InstancedSkin.DisableFrameLerp"),
+		0,
+		TEXT("Whether to use frame lerp. Cannot be changed at runtime."),
+		ECVF_ReadOnly);
+
 	enum {
 		InstancedAnimCount = 3,
 	};
@@ -384,6 +402,15 @@ namespace
 	void FGPUSkinVertexFactory::ModifyCompilationEnvironment(const FVertexFactoryType* Type, EShaderPlatform Platform, const FMaterial* Material, FShaderCompilerEnvironment& OutEnvironment)
 	{
 		FVertexFactory::ModifyCompilationEnvironment(Type, Platform, Material, OutEnvironment);
+
+		bool bLimit2BoneInfluences = (CVarInstancedSkinLimit2BoneInfluences.GetValueOnAnyThread() != 0);
+		OutEnvironment.SetDefine(TEXT("INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES"), (bLimit2BoneInfluences ? 1 : 0));
+
+		bool bDisableAnimationBlend = (CVarInstancedSkinDisableAnimationBlend.GetValueOnAnyThread() != 0);
+		OutEnvironment.SetDefine(TEXT("INSTANCED_SKIN_DISABLE_ANIMATION_BLEND"), (bDisableAnimationBlend ? 1 : 0));
+
+		bool bDisableFrameLerp = (CVarInstancedSkinDisableFrameLerp.GetValueOnAnyThread() != 0);
+		OutEnvironment.SetDefine(TEXT("INSTANCED_SKIN_DISABLE_FRAME_LERP"), (bDisableFrameLerp ? 1 : 0));
 	}
 	
 	FVertexFactoryType FGPUSkinVertexFactory::StaticType(
