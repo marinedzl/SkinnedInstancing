@@ -153,17 +153,17 @@ namespace
 				}
 
 				const int InstanceDataCount = 10;
-				BufferSize = NumInstances * sizeof(UINT) * InstanceDataCount;
+				BufferSize = NumInstances * sizeof(uint32) * InstanceDataCount;
 				if (!InstanceAnimationBuffer.IsValid())
 				{
 					FRHIResourceCreateInfo CreateInfo;
 					InstanceAnimationBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
-					InstanceAnimationBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceAnimationBuffer.VertexBufferRHI, sizeof(UINT), PF_R32_UINT);
+					InstanceAnimationBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceAnimationBuffer.VertexBufferRHI, sizeof(uint32), PF_R32_UINT);
 				}
 
 				if (InstanceAnimationBuffer.IsValid())
 				{
-					UINT* LockedBuffer = (UINT*)RHILockVertexBuffer(InstanceAnimationBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+					uint32* LockedBuffer = (uint32*)RHILockVertexBuffer(InstanceAnimationBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
 
 					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
 
@@ -179,8 +179,8 @@ namespace
 							LockedBuffer[Offset++] = AnimData.Sequence;
 							LockedBuffer[Offset++] = AnimData.PrevFrame * NumBones;
 							LockedBuffer[Offset++] = AnimData.NextFrame * NumBones;
-							LockedBuffer[Offset++] = (UINT)(AnimData.FrameLerp * 1000);
-							LockedBuffer[Offset++] = (UINT)(AnimData.BlendWeight * 1000);
+							LockedBuffer[Offset++] = (uint32)(AnimData.FrameLerp * 1000);
+							LockedBuffer[Offset++] = (uint32)(AnimData.BlendWeight * 1000);
 						}
 					}
 
