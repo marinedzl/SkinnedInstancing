@@ -55,58 +55,6 @@ namespace
 		FShaderResourceViewRHIRef VertexBufferSRV;
 	};
 
-	struct FBoneDataType
-	{
-		void Release()
-		{
-			ensure(IsInRenderingThread());
-			for (auto& BoneBuffer : BoneBuffers)
-				BoneBuffer.SafeRelease();
-		}
-
-		const FVertexBufferAndSRV& GetBoneBufferForReading(int Sequence) const
-		{
-			return BoneBuffers[Sequence];
-		}
-
-		bool UpdateBoneData(int Sequence, const TArray<FMatrix>& ReferenceToLocalMatrices)
-		{
-			uint32 BufferSize = ReferenceToLocalMatrices.Num() * 3 * sizeof(FVector4);
-
-			FVertexBufferAndSRV& BoneBuffer = BoneBuffers[Sequence];
-
-			if (!BoneBuffer.IsValid())
-			{
-				FRHIResourceCreateInfo CreateInfo;
-				BoneBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
-				BoneBuffer.VertexBufferSRV = RHICreateShaderResourceView(BoneBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
-			}
-
-			if (BoneBuffer.IsValid() && ReferenceToLocalMatrices.Num() > 0)
-			{
-				const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
-				FMatrix3x4* LockedBuffer = (FMatrix3x4*)RHILockVertexBuffer(BoneBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
-
-				for (size_t i = 0; i < ReferenceToLocalMatrices.Num(); i++)
-				{
-					FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + i + PreFetchStride);
-					FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
-
-					FMatrix3x4& BoneMat = LockedBuffer[i];
-					const FMatrix& RefToLocal = ReferenceToLocalMatrices[i];
-					RefToLocal.To3x4MatrixTranspose((float*)BoneMat.M);
-				}
-
-				RHIUnlockVertexBuffer(BoneBuffer.VertexBufferRHI);
-			}
-
-			return true;
-		}
-
-	private:
-		FVertexBufferAndSRV BoneBuffers[InstancedAnimCount];
-	};
-
 	class FGPUSkinVertexFactory : public FVertexFactory
 	{
 	public:
@@ -695,32 +643,32 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 
 	bBoneDataUpdated = true;
 
-	const int32 LODIndex = 0;
-	check(LODIndex < SkeletalMeshRenderData->LODRenderData.Num());
-
-	const FSkeletalMeshLODRenderData& LODData = SkeletalMeshRenderData->LODRenderData[LODIndex];
-
-	FBoneContainer BoneContainer;
-	const TArray<FBoneIndexType>& RequiredBones = LODData.RequiredBones;
-	BoneContainer.InitializeTo(RequiredBones, FCurveEvaluationOption(), *SkeletalMesh);
-
-	for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); SectionIndex++)
+	for (int32 LODIndex = 0; LODIndex < SkeletalMeshRenderData->LODRenderData.Num(); LODIndex++)
 	{
-		const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-		FGPUSkinVertexFactory* VertexFactory = GetSkinVertexFactory(LODIndex, SectionIndex);
-		const TArray<FBoneIndexType>& BoneMap = Section.BoneMap;
+		const FSkeletalMeshLODRenderData& LODData = SkeletalMeshRenderData->LODRenderData[LODIndex];
 
-		for (int i = 0; i < InstancedAnimCount; i++)
+		FBoneContainer BoneContainer;
+		const TArray<FBoneIndexType>& RequiredBones = LODData.RequiredBones;
+		BoneContainer.InitializeTo(RequiredBones, FCurveEvaluationOption(), *SkeletalMesh);
+
+		for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); SectionIndex++)
 		{
-			if (!ensureMsgf(Section.MaxBoneInfluences <= MAX_INFLUENCES_PER_STREAM,
-				TEXT("FInstancedSkinnedMeshObject::UpdateBoneDataDeferred with invalid MaxBoneInfluences. Owner:%s LODIndex:%d UseMaterialIndex:%d"),
-				*SkeletalMesh->GetName(), LODIndex, Section.MaterialIndex))
+			const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
+			FGPUSkinVertexFactory* VertexFactory = GetSkinVertexFactory(LODIndex, SectionIndex);
+			const TArray<FBoneIndexType>& BoneMap = Section.BoneMap;
+
+			for (int i = 0; i < InstancedAnimCount; i++)
 			{
-				UpdateBoneDataDummy(VertexFactory, i, BoneMap.Num() * AnimSequences[i]->GetNumberOfFrames());
-			}
-			else
-			{
-				UpdateBoneData(VertexFactory, i, AnimSequences[i], BoneMap, &BoneContainer);
+				if (!ensureMsgf(Section.MaxBoneInfluences <= MAX_INFLUENCES_PER_STREAM,
+					TEXT("FInstancedSkinnedMeshObject::UpdateBoneDataDeferred with invalid MaxBoneInfluences. Owner:%s LODIndex:%d UseMaterialIndex:%d"),
+					*SkeletalMesh->GetName(), LODIndex, Section.MaterialIndex))
+				{
+					UpdateBoneDataDummy(VertexFactory, i, BoneMap.Num() * AnimSequences[i]->GetNumberOfFrames());
+				}
+				else
+				{
+					UpdateBoneData(VertexFactory, i, AnimSequences[i], BoneMap, &BoneContainer);
+				}
 			}
 		}
 	}
@@ -835,11 +783,11 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCo
 		}
 
 		FMeshBatchElement& BatchElement = Mesh.Elements[0];
-		BatchElement.FirstIndex = LODData.RenderSections[SectionIndex].BaseIndex;
+		BatchElement.FirstIndex = Section.BaseIndex;
 		BatchElement.IndexBuffer = LODData.MultiSizeIndexContainer.GetIndexBuffer();
 		BatchElement.MaxVertexIndex = LODData.GetNumVertices() - 1;
 		BatchElement.PrimitiveUniformBuffer = GetUniformBuffer();
-		BatchElement.NumPrimitives = LODData.RenderSections[SectionIndex].NumTriangles;
+		BatchElement.NumPrimitives = Section.NumTriangles;
 		BatchElement.NumInstances = InstanceData.Num();
 
 		Mesh.bWireframe |= EngineShowFlags.Wireframe;
