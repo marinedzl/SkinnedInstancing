@@ -143,9 +143,9 @@ namespace
 				return true;
 			}
 
-			bool UpdateInstanceData(const TMap<int, FInstancedSkinnedMeshInstanceData>& PerInstanceSMData, int NumBones)
+			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceData, int NumBones)
 			{
-				const uint32 NumInstances = PerInstanceSMData.Num();
+				const uint32 NumInstances = InstanceData.Num();
 				uint32 BufferSize = NumInstances * 4 * sizeof(FVector4);
 
 				if (!InstanceTransformBuffer.IsValid())
@@ -161,17 +161,16 @@ namespace
 
 					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
 
-					int i = 0;
-					for (auto& Elem : PerInstanceSMData)
+					for (uint32 i = 0; i < NumInstances; i++)
 					{
-						LockedBuffer[i++] = Elem.Value.Transform;
+						LockedBuffer[i] = InstanceData[i].Transform;
 					}
 
 					RHIUnlockVertexBuffer(InstanceTransformBuffer.VertexBufferRHI);
 				}
 
-				const int InstanceDataCount = 10;
-				BufferSize = NumInstances * sizeof(uint32) * InstanceDataCount;
+				const uint32 InstanceDataStride = 10;
+				BufferSize = NumInstances * sizeof(uint32) * InstanceDataStride;
 				if (!InstanceAnimationBuffer.IsValid())
 				{
 					FRHIResourceCreateInfo CreateInfo;
@@ -185,15 +184,13 @@ namespace
 
 					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
 
-
-					int i = 0;
-					for (auto& Elem : PerInstanceSMData)
+					for (uint32 i = 0; i < NumInstances; i++)
 					{
-						int Offset = i++ * InstanceDataCount;
+						uint32 Offset = i * InstanceDataStride;
 
-						for (int j = 0; j < 2; j++)
+						for (uint32 j = 0; j < 2; j++)
 						{
-							const auto& AnimData = Elem.Value.AnimDatas[j];
+							const auto& AnimData = InstanceData[i].AnimDatas[j];
 							LockedBuffer[Offset++] = AnimData.Sequence;
 							LockedBuffer[Offset++] = AnimData.PrevFrame * NumBones;
 							LockedBuffer[Offset++] = AnimData.NextFrame * NumBones;
@@ -770,6 +767,10 @@ public: // override
 	}
 
 private:
+	void GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
+		int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData) const;
+
+private:
 	UInstancedSkinnedMeshComponent* Component;
 	UBodySetup* BodySetup;
 	FMaterialRelevance MaterialRelevance;
@@ -796,107 +797,99 @@ FInstancedSkinnedMeshSceneProxy::~FInstancedSkinnedMeshSceneProxy()
 {
 }
 
-void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views, const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
+void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
+	int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData) const
 {
-	if (Component->PerInstanceSMData.Num() <= 0)
-		return;
-
-	MeshObject->UpdateBoneDataDeferred();
-
-	const int32 LODIndex = 0;
-	check(LODIndex < SkeletalMeshRenderData->LODRenderData.Num());
-
 	const FSkeletalMeshLODRenderData& LODData = SkeletalMeshRenderData->LODRenderData[LODIndex];
 
 	for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); SectionIndex++)
 	{
 		const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
 		FGPUSkinVertexFactory* VertexFactory = MeshObject->GetSkinVertexFactory(LODIndex, SectionIndex);
-		VertexFactory->GetShaderData().UpdateInstanceData(Component->PerInstanceSMData, Section.BoneMap.Num());
-	}
 
-	for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); SectionIndex++)
-	{
-		const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
+		if (!VertexFactory)
+			continue;
 
-		const bool bIsWireframe = ViewFamily.EngineShowFlags.Wireframe;
+		// UpdateInstanceData
+		VertexFactory->GetShaderData().UpdateInstanceData(InstanceData, Section.BoneMap.Num());
 
-		for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
+		// Collect MeshBatch
+		FMeshBatch& Mesh = Collector.AllocateMesh();
+
+		Mesh.VertexFactory = MeshObject->GetSkinVertexFactory(LODIndex, SectionIndex);
+
+		// Get material
+		const FSkeletalMeshLODInfo& Info = *(SkeletalMesh->GetLODInfo(LODIndex));
+		int32 UseMaterialIndex = Section.MaterialIndex;
+		if (LODIndex > 0)
 		{
-			if (VisibilityMap & (1 << ViewIndex))
+			if (Section.MaterialIndex < Info.LODMaterialMap.Num())
 			{
-				const FSceneView* View = Views[ViewIndex];
-
-				FMeshBatch& Mesh = Collector.AllocateMesh();
-
-				Mesh.VertexFactory = MeshObject->GetSkinVertexFactory(LODIndex, SectionIndex);
-
-				// Get material
-				const FSkeletalMeshLODInfo& Info = *(SkeletalMesh->GetLODInfo(LODIndex));
-				int32 UseMaterialIndex = Section.MaterialIndex;
-				if (LODIndex > 0)
-				{
-					if (Section.MaterialIndex < Info.LODMaterialMap.Num())
-					{
-						UseMaterialIndex = Info.LODMaterialMap[Section.MaterialIndex];
-						UseMaterialIndex = FMath::Clamp(UseMaterialIndex, 0, SkeletalMesh->Materials.Num());
-					}
-				}
-
-				UMaterialInterface* Material = Component->GetMaterial(UseMaterialIndex);
-				if (!Material)
-				{
-					Material = UMaterial::GetDefaultMaterial(MD_Surface);
-				}
-
-				if (Material)
-				{
-					Mesh.MaterialRenderProxy = Material->GetRenderProxy();
-				}
-
-				FMeshBatchElement& BatchElement = Mesh.Elements[0];
-				BatchElement.FirstIndex = LODData.RenderSections[SectionIndex].BaseIndex;
-				BatchElement.IndexBuffer = LODData.MultiSizeIndexContainer.GetIndexBuffer();
-				BatchElement.MaxVertexIndex = LODData.GetNumVertices() - 1;
-				BatchElement.PrimitiveUniformBuffer = GetUniformBuffer();
-				BatchElement.NumPrimitives = LODData.RenderSections[SectionIndex].NumTriangles;
-				BatchElement.NumInstances = Component->PerInstanceSMData.Num();
-
-				if (!Mesh.VertexFactory)
-				{
-					// hide this part
-					continue;
-				}
-
-				Mesh.bWireframe |= bIsWireframe;
-				Mesh.Type = PT_TriangleList;
-				Mesh.bSelectable = true;
-
-				BatchElement.MinVertexIndex = Section.BaseVertexIndex;
-				Mesh.ReverseCulling = IsLocalToWorldDeterminantNegative();
-				Mesh.CastShadow = true;
-				Mesh.bCanApplyViewModeOverrides = true;
-
-				if (ensureMsgf(Mesh.MaterialRenderProxy, TEXT("GetDynamicElementsSection with invalid MaterialRenderProxy. Owner:%s LODIndex:%d UseMaterialIndex:%d"), *GetOwnerName().ToString(), LODIndex, UseMaterialIndex) &&
-					ensureMsgf(Mesh.MaterialRenderProxy->GetMaterial(FeatureLevel), TEXT("GetDynamicElementsSection with invalid FMaterial. Owner:%s LODIndex:%d UseMaterialIndex:%d"), *GetOwnerName().ToString(), LODIndex, UseMaterialIndex))
-				{
-					Collector.AddMesh(ViewIndex, Mesh);
-				}
+				UseMaterialIndex = Info.LODMaterialMap[Section.MaterialIndex];
+				UseMaterialIndex = FMath::Clamp(UseMaterialIndex, 0, SkeletalMesh->Materials.Num());
 			}
 		}
-	}
 
-	// Draw bounds
+		UMaterialInterface* Material = Component->GetMaterial(UseMaterialIndex);
+		if (!Material)
+		{
+			Material = UMaterial::GetDefaultMaterial(MD_Surface);
+		}
+
+		if (Material)
+		{
+			Mesh.MaterialRenderProxy = Material->GetRenderProxy();
+		}
+
+		FMeshBatchElement& BatchElement = Mesh.Elements[0];
+		BatchElement.FirstIndex = LODData.RenderSections[SectionIndex].BaseIndex;
+		BatchElement.IndexBuffer = LODData.MultiSizeIndexContainer.GetIndexBuffer();
+		BatchElement.MaxVertexIndex = LODData.GetNumVertices() - 1;
+		BatchElement.PrimitiveUniformBuffer = GetUniformBuffer();
+		BatchElement.NumPrimitives = LODData.RenderSections[SectionIndex].NumTriangles;
+		BatchElement.NumInstances = Component->PerInstanceSMData.Num();
+
+		Mesh.bWireframe |= EngineShowFlags.Wireframe;
+		Mesh.Type = PT_TriangleList;
+		Mesh.bSelectable = true;
+
+		BatchElement.MinVertexIndex = Section.BaseVertexIndex;
+		Mesh.ReverseCulling = IsLocalToWorldDeterminantNegative();
+		Mesh.CastShadow = true;
+		Mesh.bCanApplyViewModeOverrides = true;
+
+		if (ensureMsgf(Mesh.MaterialRenderProxy, TEXT("GetDynamicElementsSection with invalid MaterialRenderProxy. Owner:%s LODIndex:%d UseMaterialIndex:%d"), *GetOwnerName().ToString(), LODIndex, UseMaterialIndex) &&
+			ensureMsgf(Mesh.MaterialRenderProxy->GetMaterial(FeatureLevel), TEXT("GetDynamicElementsSection with invalid FMaterial. Owner:%s LODIndex:%d UseMaterialIndex:%d"), *GetOwnerName().ToString(), LODIndex, UseMaterialIndex))
+		{
+			Collector.AddMesh(ViewIndex, Mesh);
+		}
+
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		RenderBounds(Collector.GetPDI(ViewIndex), EngineShowFlags, GetBounds(), IsSelected());
+#endif
+	}
+}
+
+void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views,
+	const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
+{
+	if (Component->PerInstanceSMData.Num() <= 0)
+		return;
+
+	MeshObject->UpdateBoneDataDeferred();
+
+	TArray<FInstancedSkinnedMeshInstanceData> InstanceData;
+	InstanceData.Reserve(Component->PerInstanceSMData.Num());
+	for (auto Pair : Component->PerInstanceSMData)
+		InstanceData.Add(Pair.Value);
+
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
 	{
 		if (VisibilityMap & (1 << ViewIndex))
 		{
-			// Render bounds
-			RenderBounds(Collector.GetPDI(ViewIndex), ViewFamily.EngineShowFlags, GetBounds(), IsSelected());
+			GetDynamicMeshElementsByLOD(Collector, ViewIndex, ViewFamily.EngineShowFlags, 0, InstanceData);
 		}
 	}
-#endif
 }
 
 FPrimitiveViewRelevance FInstancedSkinnedMeshSceneProxy::GetViewRelevance(const FSceneView * View) const
