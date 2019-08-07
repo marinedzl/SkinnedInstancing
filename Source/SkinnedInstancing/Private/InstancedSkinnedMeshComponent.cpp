@@ -143,15 +143,16 @@ namespace
 				return true;
 			}
 
-			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceData, int NumBones)
+			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceData, int MaxNumInstances, int NumBones)
 			{
 				const uint32 NumInstances = InstanceData.Num();
 				uint32 BufferSize = NumInstances * 4 * sizeof(FVector4);
 
 				if (!InstanceTransformBuffer.IsValid())
 				{
+					uint32 MaxBufferSize = MaxNumInstances * 4 * sizeof(FVector4);
 					FRHIResourceCreateInfo CreateInfo;
-					InstanceTransformBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					InstanceTransformBuffer.VertexBufferRHI = RHICreateVertexBuffer(MaxBufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
 					InstanceTransformBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceTransformBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
 				}
 
@@ -173,8 +174,9 @@ namespace
 				BufferSize = NumInstances * sizeof(uint32) * InstanceDataStride;
 				if (!InstanceAnimationBuffer.IsValid())
 				{
+					uint32 MaxBufferSize = MaxNumInstances * sizeof(uint32) * InstanceDataStride;
 					FRHIResourceCreateInfo CreateInfo;
-					InstanceAnimationBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					InstanceAnimationBuffer.VertexBufferRHI = RHICreateVertexBuffer(MaxBufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
 					InstanceAnimationBuffer.VertexBufferSRV = RHICreateShaderResourceView(InstanceAnimationBuffer.VertexBufferRHI, sizeof(uint32), PF_R32_UINT);
 				}
 
@@ -709,7 +711,7 @@ public: // override
 
 private:
 	void GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
-		int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData) const;
+		int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData, int32 MaxNumInstances) const;
 
 private:
 	UInstancedSkinnedMeshComponent* Component;
@@ -739,7 +741,7 @@ FInstancedSkinnedMeshSceneProxy::~FInstancedSkinnedMeshSceneProxy()
 }
 
 void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
-	int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData) const
+	int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData, int32 MaxNumInstances) const
 {
 	const FSkeletalMeshLODRenderData& LODData = SkeletalMeshRenderData->LODRenderData[LODIndex];
 
@@ -752,7 +754,7 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCo
 			continue;
 
 		// UpdateInstanceData
-		VertexFactory->GetShaderData().UpdateInstanceData(InstanceData, Section.BoneMap.Num());
+		VertexFactory->GetShaderData().UpdateInstanceData(InstanceData, MaxNumInstances, Section.BoneMap.Num());
 
 		// Collect MeshBatch
 		FMeshBatch& Mesh = Collector.AllocateMesh();
@@ -811,24 +813,85 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCo
 	}
 }
 
+int32 GetMinDesiredLODLevel(USkeletalMesh* SkeletalMesh, const FSceneView* View, const FVector4& Origin, const float SphereRadius)
+{
+	static const auto* SkeletalMeshLODRadiusScale = IConsoleManager::Get().FindTConsoleVariableDataFloat(TEXT("r.SkeletalMeshLODRadiusScale"));
+	float LODScale = FMath::Clamp(SkeletalMeshLODRadiusScale->GetValueOnRenderThread(), 0.25f, 1.0f);
+
+	const float ScreenRadiusSquared = ComputeBoundsScreenRadiusSquared(Origin, SphereRadius, *View) * LODScale * LODScale;
+
+	// Need the current LOD
+	const int32 CurrentLODLevel = 0;
+	int32 NewLODLevel = 0;
+
+	// Look for a lower LOD if the EngineShowFlags is enabled - Thumbnail rendering disables LODs
+	if (View->Family && 1 == View->Family->EngineShowFlags.LOD)
+	{
+		int32 LODNum = SkeletalMesh->GetResourceForRendering()->LODRenderData.Num();
+
+		// Iterate from worst to best LOD
+		for (int32 LODLevel = LODNum - 1; LODLevel > 0; LODLevel--)
+		{
+			FSkeletalMeshLODInfo* LODInfo = SkeletalMesh->GetLODInfo(LODLevel);
+
+			// Get ScreenSize for this LOD
+			float ScreenSize = LODInfo->ScreenSize.Default;
+
+			// If we are considering shifting to a better (lower) LOD, bias with hysteresis.
+			if (LODLevel <= CurrentLODLevel)
+			{
+				ScreenSize += LODInfo->LODHysteresis;
+			}
+
+			// If have passed this boundary, use this LOD
+			if (FMath::Square(ScreenSize * 0.5f) > ScreenRadiusSquared)
+			{
+				NewLODLevel = LODLevel;
+				break;
+			}
+		}
+	}
+
+	return NewLODLevel;
+}
+
 void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views,
 	const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
 {
 	if (Component->PerInstanceSMData.Num() <= 0)
 		return;
 
+	// UpdateBoneDataDeferred 
 	MeshObject->UpdateBoneDataDeferred();
-
-	TArray<FInstancedSkinnedMeshInstanceData> InstanceData;
-	InstanceData.Reserve(Component->PerInstanceSMData.Num());
-	for (auto Pair : Component->PerInstanceSMData)
-		InstanceData.Add(Pair.Value);
 
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
 	{
 		if (VisibilityMap & (1 << ViewIndex))
 		{
-			GetDynamicMeshElementsByLOD(Collector, ViewIndex, ViewFamily.EngineShowFlags, 0, InstanceData);
+			int32 MaxNumInstances = Component->PerInstanceSMData.Num();
+			int32 LODNum = SkeletalMeshRenderData->LODRenderData.Num();
+
+			TArray<TArray<FInstancedSkinnedMeshInstanceData>> InstanceDatas;
+			for (int32 i = 0; i < LODNum; i++)
+				InstanceDatas.Add(TArray<FInstancedSkinnedMeshInstanceData>());
+
+			// Calc LOD Instance
+			for (auto Pair : Component->PerInstanceSMData)
+			{
+				const FInstancedSkinnedMeshInstanceData& Instance = Pair.Value;
+				int LODLevel = GetMinDesiredLODLevel(SkeletalMesh, Views[ViewIndex], Instance.Transform.GetOrigin(), 100);
+				check(LODLevel < LODNum);
+				InstanceDatas[LODLevel].Add(Instance);
+			}
+
+			// Draw All LOD
+			for (int32 LODIndex = 0; LODIndex < LODNum; LODIndex++)
+			{
+				if (InstanceDatas[LODIndex].Num() > 0)
+				{
+					GetDynamicMeshElementsByLOD(Collector, ViewIndex, ViewFamily.EngineShowFlags, LODIndex, InstanceDatas[LODIndex], MaxNumInstances);
+				}
+			}
 		}
 	}
 }
