@@ -847,7 +847,7 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCo
 		BatchElement.MaxVertexIndex = LODData.GetNumVertices() - 1;
 		BatchElement.PrimitiveUniformBuffer = GetUniformBuffer();
 		BatchElement.NumPrimitives = LODData.RenderSections[SectionIndex].NumTriangles;
-		BatchElement.NumInstances = Component->PerInstanceSMData.Num();
+		BatchElement.NumInstances = InstanceData.Num();
 
 		Mesh.bWireframe |= EngineShowFlags.Wireframe;
 		Mesh.Type = PT_TriangleList;
