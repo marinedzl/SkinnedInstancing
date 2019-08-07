@@ -55,6 +55,58 @@ namespace
 		FShaderResourceViewRHIRef VertexBufferSRV;
 	};
 
+	struct FBoneDataType
+	{
+		void Release()
+		{
+			ensure(IsInRenderingThread());
+			for (auto& BoneBuffer : BoneBuffers)
+				BoneBuffer.SafeRelease();
+		}
+
+		const FVertexBufferAndSRV& GetBoneBufferForReading(int Sequence) const
+		{
+			return BoneBuffers[Sequence];
+		}
+
+		bool UpdateBoneData(int Sequence, const TArray<FMatrix>& ReferenceToLocalMatrices)
+		{
+			uint32 BufferSize = ReferenceToLocalMatrices.Num() * 3 * sizeof(FVector4);
+
+			FVertexBufferAndSRV& BoneBuffer = BoneBuffers[Sequence];
+
+			if (!BoneBuffer.IsValid())
+			{
+				FRHIResourceCreateInfo CreateInfo;
+				BoneBuffer.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+				BoneBuffer.VertexBufferSRV = RHICreateShaderResourceView(BoneBuffer.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
+			}
+
+			if (BoneBuffer.IsValid() && ReferenceToLocalMatrices.Num() > 0)
+			{
+				const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
+				FMatrix3x4* LockedBuffer = (FMatrix3x4*)RHILockVertexBuffer(BoneBuffer.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+
+				for (size_t i = 0; i < ReferenceToLocalMatrices.Num(); i++)
+				{
+					FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + i + PreFetchStride);
+					FPlatformMisc::Prefetch(ReferenceToLocalMatrices.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
+
+					FMatrix3x4& BoneMat = LockedBuffer[i];
+					const FMatrix& RefToLocal = ReferenceToLocalMatrices[i];
+					RefToLocal.To3x4MatrixTranspose((float*)BoneMat.M);
+				}
+
+				RHIUnlockVertexBuffer(BoneBuffer.VertexBufferRHI);
+			}
+
+			return true;
+		}
+
+	private:
+		FVertexBufferAndSRV BoneBuffers[InstancedAnimCount];
+	};
+
 	class FGPUSkinVertexFactory : public FVertexFactory
 	{
 	public:
@@ -439,7 +491,6 @@ public:
 	FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh, ERHIFeatureLevel::Type FeatureLevel, UAnimSequence* AnimSequences[InstancedAnimCount]);
 	virtual ~FInstancedSkinnedMeshObject();
 public:
-	virtual void InitResources();
 	virtual void ReleaseResources();
 	FGPUSkinVertexFactory* GetSkinVertexFactory(int32 LODIndex, int32 ChunkIdx) const;
 	void UpdateBoneDataDeferred();
@@ -448,7 +499,6 @@ private:
 		UAnimSequence* AnimSequence, const TArray<FBoneIndexType>& BoneMap, const FBoneContainer* BoneContainer);
 	void UpdateBoneDataDummy(FGPUSkinVertexFactory* VertexFactory, int Sequence, int DataCount);
 private:
-	class FVertexFactoryData;
 	struct FSkeletalMeshObjectLOD;
 private:
 	ERHIFeatureLevel::Type FeatureLevel;
@@ -459,44 +509,45 @@ private:
 	UAnimSequence* AnimSequences[InstancedAnimCount];
 };
 
-class FInstancedSkinnedMeshObject::FVertexFactoryData
+struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
 {
-public:
-	FVertexFactoryData() {}
-
-	TArray<TUniquePtr<FGPUSkinVertexFactory>> VertexFactories;
-
-	void InitVertexFactories(
-		const FVertexFactoryBuffers& InVertexBuffers,
-		const TArray<FSkelMeshRenderSection>& Sections,
-		ERHIFeatureLevel::Type InFeatureLevel)
+	void InitResources(FSkeletalMeshLODRenderData& LODData, ERHIFeatureLevel::Type InFeatureLevel)
 	{
+		// Vertex buffers available for the LOD
+		FVertexFactoryBuffers VertexBuffers;
+
+		VertexBuffers.StaticVertexBuffers = &LODData.StaticVertexBuffers;
+		VertexBuffers.SkinWeightVertexBuffer = &LODData.SkinWeightVertexBuffer;
+		VertexBuffers.NumVertices = LODData.GetNumVertices();
+
+		// init gpu skin factories
+
 		// first clear existing factories (resources assumed to have been released already)
 		// then [re]create the factories
 
-		VertexFactories.Empty(Sections.Num());
+		VertexFactories.Empty(LODData.RenderSections.Num());
+
+		for (int32 FactoryIdx = 0; FactoryIdx < LODData.RenderSections.Num(); ++FactoryIdx)
 		{
-			for (int32 FactoryIdx = 0; FactoryIdx < Sections.Num(); ++FactoryIdx)
+			FGPUSkinVertexFactory* VertexFactory = new FGPUSkinVertexFactory(InFeatureLevel, VertexBuffers.NumVertices);
+			VertexFactories.Add(TUniquePtr<FGPUSkinVertexFactory>(VertexFactory));
+
+			// update vertex factory components and sync it
+			ENQUEUE_RENDER_COMMAND(InitGPUSkinVertexFactory)(
+				[VertexFactory, VertexBuffers](FRHICommandList& CmdList)
 			{
-				FGPUSkinVertexFactory* VertexFactory = new FGPUSkinVertexFactory(InFeatureLevel, InVertexBuffers.NumVertices);
-				VertexFactories.Add(TUniquePtr<FGPUSkinVertexFactory>(VertexFactory));
-
-				// update vertex factory components and sync it
-				ENQUEUE_RENDER_COMMAND(InitGPUSkinVertexFactory)(
-					[VertexFactory, InVertexBuffers](FRHICommandList& CmdList)
-				{
-					VertexFactory->InitGPUSkinVertexFactoryComponents(InVertexBuffers);
-				}
-				);
-
-				// init rendering resource	
-				BeginInitResource(VertexFactory);
+				VertexFactory->InitGPUSkinVertexFactoryComponents(VertexBuffers);
 			}
+			);
+
+			// init rendering resource	
+			BeginInitResource(VertexFactory);
 		}
 	}
 
-	void ReleaseVertexFactories()
+	void ReleaseResources()
 	{
+		// Release gpu skin vertex factories
 		for (int32 FactoryIdx = 0; FactoryIdx < VertexFactories.Num(); FactoryIdx++)
 		{
 			BeginReleaseResource(VertexFactories[FactoryIdx].Get());
@@ -509,49 +560,9 @@ public:
 		Size += VertexFactories.GetAllocatedSize();
 		return Size;
 	}
-};
 
-struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
-{
-	FSkeletalMeshObjectLOD(FSkeletalMeshRenderData* InSkelMeshRenderData, int32 InLOD)
-		: SkelMeshRenderData(InSkelMeshRenderData)
-		, LODIndex(InLOD)
-	{
-	}
-
-	void InitResources(ERHIFeatureLevel::Type InFeatureLevel)
-	{
-		check(SkelMeshRenderData);
-		check(SkelMeshRenderData->LODRenderData.IsValidIndex(LODIndex));
-
-		// Vertex buffers available for the LOD
-		FVertexFactoryBuffers VertexBuffers;
-
-		// vertex buffer for each lod has already been created when skelmesh was loaded
-		FSkeletalMeshLODRenderData& LODData = SkelMeshRenderData->LODRenderData[LODIndex];
-
-		VertexBuffers.StaticVertexBuffers = &LODData.StaticVertexBuffers;
-		VertexBuffers.SkinWeightVertexBuffer = &LODData.SkinWeightVertexBuffer;
-		VertexBuffers.NumVertices = LODData.GetNumVertices();
-
-		// init gpu skin factories
-		GPUSkinVertexFactories.InitVertexFactories(VertexBuffers, LODData.RenderSections, InFeatureLevel);
-	}
-
-	void ReleaseResources()
-	{
-		// Release gpu skin vertex factories
-		GPUSkinVertexFactories.ReleaseVertexFactories();
-	}
-
-public:
-	FSkeletalMeshRenderData* SkelMeshRenderData;
-
-	// index into FSkeletalMeshRenderData::LODRenderData[]
-	int32 LODIndex;
-
-	/** Default GPU skinning vertex factories and matrices */
-	FVertexFactoryData GPUSkinVertexFactories;
+	// Per Section
+	TArray<TUniquePtr<FGPUSkinVertexFactory>> VertexFactories;
 };
 
 FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh,
@@ -564,52 +575,34 @@ FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* Skeletal
 {
 	// create LODs to match the base mesh
 	LODs.Empty(SkeletalMeshRenderData->LODRenderData.Num());
+
 	for (int32 LODIndex = 0; LODIndex < SkeletalMeshRenderData->LODRenderData.Num(); LODIndex++)
 	{
-		new(LODs) FSkeletalMeshObjectLOD(SkeletalMeshRenderData, LODIndex);
+		new(LODs) FSkeletalMeshObjectLOD();
+
+		// Skip LODs that have their render data stripped
+		if (SkeletalMeshRenderData->LODRenderData.IsValidIndex(LODIndex)
+			&& SkeletalMeshRenderData->LODRenderData[LODIndex].GetNumVertices() > 0)
+		{
+			LODs[LODIndex].InitResources(SkeletalMeshRenderData->LODRenderData[LODIndex],  FeatureLevel);
+		}
 	}
 
 	for (int i = 0; i < InstancedAnimCount; i++)
 	{
 		AnimSequences[i] = InAnimSequences[i];
 	}
-
-	InitResources();
 }
 
 FInstancedSkinnedMeshObject::~FInstancedSkinnedMeshObject()
 {
 }
 
-void FInstancedSkinnedMeshObject::InitResources()
-{
-	for (int32 LODIndex = 0; LODIndex < LODs.Num(); LODIndex++)
-	{
-		FSkeletalMeshObjectLOD& SkelLOD = LODs[LODIndex];
-
-		// Skip LODs that have their render data stripped
-		if (SkelLOD.SkelMeshRenderData
-			&& SkelLOD.SkelMeshRenderData->LODRenderData.IsValidIndex(LODIndex)
-			&& SkelLOD.SkelMeshRenderData->LODRenderData[LODIndex].GetNumVertices() > 0)
-		{
-			SkelLOD.InitResources(FeatureLevel);
-		}
-	}
-}
-
 void FInstancedSkinnedMeshObject::ReleaseResources()
 {
 	for (int32 LODIndex = 0; LODIndex < LODs.Num(); LODIndex++)
 	{
-		FSkeletalMeshObjectLOD& SkelLOD = LODs[LODIndex];
-
-		// Skip LODs that have their render data stripped
-		if (SkelLOD.SkelMeshRenderData 
-			&& SkelLOD.SkelMeshRenderData->LODRenderData.IsValidIndex(LODIndex) 
-			&& SkelLOD.SkelMeshRenderData->LODRenderData[LODIndex].GetNumVertices() > 0)
-		{
-			SkelLOD.ReleaseResources();
-		}
+		LODs[LODIndex].ReleaseResources();
 	}
 }
 
@@ -620,7 +613,7 @@ FGPUSkinVertexFactory* FInstancedSkinnedMeshObject::GetSkinVertexFactory(int32 L
 	const FSkeletalMeshObjectLOD& LOD = LODs[LODIndex];
 
 	// use the default gpu skin vertex factory
-	return LOD.GPUSkinVertexFactories.VertexFactories[ChunkIdx].Get();
+	return LOD.VertexFactories[ChunkIdx].Get();
 }
 
 void FInstancedSkinnedMeshObject::UpdateBoneData(FGPUSkinVertexFactory* VertexFactory, int Sequence, UAnimSequence* AnimSequence, const TArray<FBoneIndexType>& BoneMap, const FBoneContainer* BoneContainer)
