@@ -518,9 +518,9 @@ struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
 FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh,
 	ERHIFeatureLevel::Type FeatureLevel,
 	UAnimSequence* InAnimSequences[InstancedAnimCount])
-	: SkeletalMesh(SkeletalMesh)
+	: FeatureLevel(FeatureLevel)
+	, SkeletalMesh(SkeletalMesh)
 	, SkeletalMeshRenderData(SkeletalMesh->GetResourceForRendering())
-	, FeatureLevel(FeatureLevel)
 	, bBoneDataUpdated(false)
 {
 	// create LODs to match the base mesh
