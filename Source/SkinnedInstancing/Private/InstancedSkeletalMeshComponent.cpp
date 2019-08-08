@@ -147,10 +147,12 @@ void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength, 
 		if (InstanceManager)
 		{
 			UAnimSequence* AnimSequence = InstanceManager->GetSequence(Sequence);
-			int NumFrames = AnimSequence->GetNumberOfFrames();
-			check(AnimSequence);
-			FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
-			AnimtionPlayer->CrossFade(Seq, Loop, FadeLength);
+			if (AnimSequence)
+			{
+				int NumFrames = AnimSequence->GetNumberOfFrames();
+				FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
+				AnimtionPlayer->CrossFade(Seq, Loop, FadeLength);
+			}
 		}
 	}
 }

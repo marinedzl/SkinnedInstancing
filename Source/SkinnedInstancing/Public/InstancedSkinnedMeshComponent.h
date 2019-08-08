@@ -58,17 +58,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
 	class USkeletalMesh* SkeletalMesh;
 
-	/** The skeletal mesh used by this component. */
+	/** The AnimSequence used by this component. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	class UAnimSequence* AnimSequence0;
-
-	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	class UAnimSequence* AnimSequence1;
-
-	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	class UAnimSequence* AnimSequence2;
+	TArray<class UAnimSequence*> AnimSequences;
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;
