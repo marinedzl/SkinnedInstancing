@@ -74,6 +74,9 @@ public:
 	class FInstancedSkinnedMeshObject* MeshObject;
 
 private:
+	void UpdateMeshObejctDynamicData();
+
+private:
 	TMap<int, FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
 	int InstanceIdIncrease;
 

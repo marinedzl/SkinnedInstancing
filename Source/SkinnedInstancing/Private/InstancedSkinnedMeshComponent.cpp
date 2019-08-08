@@ -438,16 +438,28 @@ namespace
 class FInstancedSkinnedMeshObject : public FDeferredCleanupInterface
 {
 public:
+	class FDynamicData
+	{
+	public:
+		static FDynamicData* Alloc();
+		static void Free(FDynamicData* Who);
+	public:
+		TArray<FInstancedSkinnedMeshInstanceData> InstanceDatas;
+	};
+public:
 	FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh, ERHIFeatureLevel::Type FeatureLevel, UAnimSequence* AnimSequences[InstancedAnimCount]);
 	virtual ~FInstancedSkinnedMeshObject();
 public:
 	virtual void ReleaseResources();
 	FGPUSkinVertexFactory* GetSkinVertexFactory(int32 LODIndex, int32 ChunkIdx) const;
 	void UpdateBoneDataDeferred();
+	const FDynamicData* GetDynamicData() const { return DynamicData; }
+	void UpdateDynamicData(FDynamicData* NewDynamicData);
 private:
 	void UpdateBoneData(FGPUSkinVertexFactory* VertexFactory, int Sequence,
 		UAnimSequence* AnimSequence, const TArray<FBoneIndexType>& BoneMap, const FBoneContainer* BoneContainer);
 	void UpdateBoneDataDummy(FGPUSkinVertexFactory* VertexFactory, int Sequence, int DataCount);
+	void UpdateDynamicData_RenderThread(FDynamicData* NewDynamicData);
 private:
 	struct FSkeletalMeshObjectLOD;
 private:
@@ -457,6 +469,7 @@ private:
 	TArray<FSkeletalMeshObjectLOD> LODs;
 	bool bBoneDataUpdated;
 	UAnimSequence* AnimSequences[InstancedAnimCount];
+	FDynamicData* DynamicData;
 };
 
 struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
@@ -515,6 +528,16 @@ struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
 	TArray<TUniquePtr<FGPUSkinVertexFactory>> VertexFactories;
 };
 
+FInstancedSkinnedMeshObject::FDynamicData * FInstancedSkinnedMeshObject::FDynamicData::Alloc()
+{
+	return new FDynamicData();
+}
+
+void FInstancedSkinnedMeshObject::FDynamicData::Free(FDynamicData * Who)
+{
+	delete Who;
+}
+
 FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh,
 	ERHIFeatureLevel::Type FeatureLevel,
 	UAnimSequence* InAnimSequences[InstancedAnimCount])
@@ -522,6 +545,7 @@ FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* Skeletal
 	, SkeletalMesh(SkeletalMesh)
 	, SkeletalMeshRenderData(SkeletalMesh->GetResourceForRendering())
 	, bBoneDataUpdated(false)
+	, DynamicData(nullptr)
 {
 	// create LODs to match the base mesh
 	LODs.Empty(SkeletalMeshRenderData->LODRenderData.Num());
@@ -674,6 +698,24 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 			}
 		}
 	}
+}
+
+void FInstancedSkinnedMeshObject::UpdateDynamicData(FDynamicData * NewDynamicData)
+{
+	// queue a call to update this data
+	ENQUEUE_RENDER_COMMAND(InstancedSkinnedMeshObjectUpdateDataCommand)(
+		[this, NewDynamicData](FRHICommandListImmediate& RHICmdList)
+	{
+		UpdateDynamicData_RenderThread(NewDynamicData);
+	}
+	);
+}
+
+void FInstancedSkinnedMeshObject::UpdateDynamicData_RenderThread(FDynamicData * NewDynamicData)
+{
+	if (DynamicData)
+		FDynamicData::Free(DynamicData);
+	DynamicData = NewDynamicData;
 }
 
 class FInstancedSkinnedMeshSceneProxy final : public FPrimitiveSceneProxy
@@ -858,7 +900,8 @@ int32 GetMinDesiredLODLevel(USkeletalMesh* SkeletalMesh, const FSceneView* View,
 void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views,
 	const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
 {
-	if (Component->PerInstanceSMData.Num() <= 0)
+	auto DynamicData = MeshObject->GetDynamicData();
+	if (!DynamicData || DynamicData->InstanceDatas.Num() <= 0)
 		return;
 
 	// UpdateBoneDataDeferred 
@@ -868,28 +911,27 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 	{
 		if (VisibilityMap & (1 << ViewIndex))
 		{
-			int32 MaxNumInstances = Component->PerInstanceSMData.Num();
+			int32 MaxNumInstances = DynamicData->InstanceDatas.Num();
 			int32 LODNum = SkeletalMeshRenderData->LODRenderData.Num();
 
-			TArray<TArray<FInstancedSkinnedMeshInstanceData>> InstanceDatas;
+			TArray<TArray<FInstancedSkinnedMeshInstanceData>> LODInstanceDatas;
 			for (int32 i = 0; i < LODNum; i++)
-				InstanceDatas.Add(TArray<FInstancedSkinnedMeshInstanceData>());
+				LODInstanceDatas.Add(TArray<FInstancedSkinnedMeshInstanceData>());
 
 			// Calc LOD Instance
-			for (auto Pair : Component->PerInstanceSMData)
+			for (auto Instance : DynamicData->InstanceDatas)
 			{
-				const FInstancedSkinnedMeshInstanceData& Instance = Pair.Value;
 				int LODLevel = GetMinDesiredLODLevel(SkeletalMesh, Views[ViewIndex], Instance.Transform.GetOrigin(), 100);
 				check(LODLevel < LODNum);
-				InstanceDatas[LODLevel].Add(Instance);
+				LODInstanceDatas[LODLevel].Add(Instance);
 			}
 
 			// Draw All LOD
 			for (int32 LODIndex = 0; LODIndex < LODNum; LODIndex++)
 			{
-				if (InstanceDatas[LODIndex].Num() > 0)
+				if (LODInstanceDatas[LODIndex].Num() > 0)
 				{
-					GetDynamicMeshElementsByLOD(Collector, ViewIndex, ViewFamily.EngineShowFlags, LODIndex, InstanceDatas[LODIndex], MaxNumInstances);
+					GetDynamicMeshElementsByLOD(Collector, ViewIndex, ViewFamily.EngineShowFlags, LODIndex, LODInstanceDatas[LODIndex], MaxNumInstances);
 				}
 			}
 		}
@@ -1009,12 +1051,16 @@ void UInstancedSkinnedMeshComponent::CreateRenderState_Concurrent()
 		}
 	}
 
+	UpdateMeshObejctDynamicData();
+
 	Super::CreateRenderState_Concurrent();
 }
 
 void UInstancedSkinnedMeshComponent::SendRenderDynamicData_Concurrent()
 {
 	Super::SendRenderDynamicData_Concurrent();
+
+	UpdateMeshObejctDynamicData();
 }
 
 void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
@@ -1031,6 +1077,18 @@ void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
 		// commands execute in the rendering thread.
 		BeginCleanup(MeshObject);
 		MeshObject = nullptr;
+	}
+}
+
+void UInstancedSkinnedMeshComponent::UpdateMeshObejctDynamicData()
+{
+	if (MeshObject)
+	{
+		auto DynamicData = FInstancedSkinnedMeshObject::FDynamicData::Alloc();
+		DynamicData->InstanceDatas.Reserve(PerInstanceSMData.Num());
+		for (auto Pair : PerInstanceSMData)
+			DynamicData->InstanceDatas.Add(Pair.Value);
+		MeshObject->UpdateDynamicData(DynamicData);
 	}
 }
 
@@ -1075,6 +1133,7 @@ void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick T
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdateBounds();
 	MarkRenderTransformDirty();
+	MarkRenderDynamicDataDirty();
 }
 
 #pragma optimize( "", on )

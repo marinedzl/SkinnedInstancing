@@ -36,7 +36,7 @@ public:
 public:
 	void Tick(float DeltaTime)
 	{
-		CurrentSeq.Tick(DeltaTime, Loop);
+		CurrentSeq.Tick(DeltaTime, IsLoop);
 
 		if (FadeTime > 0 && FadeLength > 0)
 		{
@@ -53,7 +53,7 @@ public:
 
 	void Play(const Sequence& Seq, bool Loop)
 	{
-		this->Loop = Loop;
+		IsLoop = Loop;
 		CurrentSeq = NextSeq = Seq;
 		FadeLength = FadeTime = 0;
 	}
@@ -70,7 +70,7 @@ public:
 	}
 
 private:
-	bool Loop = false;
+	bool IsLoop = false;
 	float FadeLength = 0;
 
 private:
