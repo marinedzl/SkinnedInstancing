@@ -475,6 +475,8 @@ private:
 	bool bBoneDataUpdated;
 	TArray<UAnimSequence*> AnimSequences;
 	FDynamicData* DynamicData;
+public:
+	TArray<TArray<FInstancedSkinnedMeshInstanceData>> TempLODInstanceDatas;
 };
 
 struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
@@ -910,6 +912,8 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 	// UpdateBoneDataDeferred 
 	MeshObject->UpdateBoneDataDeferred();
 
+	auto& LODInstanceDatas = MeshObject->TempLODInstanceDatas;
+
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
 	{
 		if (VisibilityMap & (1 << ViewIndex))
@@ -917,9 +921,11 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 			int32 MaxNumInstances = DynamicData->InstanceDatas.Num();
 			int32 LODNum = SkeletalMeshRenderData->LODRenderData.Num();
 
-			TArray<TArray<FInstancedSkinnedMeshInstanceData>> LODInstanceDatas;
+			if (LODInstanceDatas.Num() < LODNum)
+				LODInstanceDatas.AddDefaulted(LODNum - LODInstanceDatas.Num());
+
 			for (int32 i = 0; i < LODNum; i++)
-				LODInstanceDatas.Add(TArray<FInstancedSkinnedMeshInstanceData>());
+				LODInstanceDatas[i].Reset();
 
 			// Calc LOD Instance
 			for (auto Instance : DynamicData->InstanceDatas)
