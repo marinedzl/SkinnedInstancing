@@ -449,6 +449,10 @@ public:
 	public:
 		static FDynamicData* Alloc();
 		static void Free(FDynamicData* Who);
+		void Clear()
+		{
+			InstanceDatas.Reset();
+		}
 	public:
 		TArray<FInstancedSkinnedMeshInstanceData> InstanceDatas;
 	};
@@ -535,14 +539,47 @@ struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
 	TArray<TUniquePtr<FGPUSkinVertexFactory>> VertexFactories;
 };
 
+namespace
+{
+	TArray<FInstancedSkinnedMeshObject::FDynamicData*> FreeDynamicDatas;
+	FCriticalSection FreeDynamicDatasCriticalSection;
+	int32 GMinPoolCount = 0;
+	int32 GAllocationCounter = 0;
+	const int32 GAllocationsBeforeCleanup = 1000; // number of allocations we make before we clean up the pool, this number is increased when we have to allocate not from the pool
+}
+
 FInstancedSkinnedMeshObject::FDynamicData * FInstancedSkinnedMeshObject::FDynamicData::Alloc()
 {
-	return new FDynamicData();
+	FScopeLock S(&FreeDynamicDatasCriticalSection);
+	++GAllocationCounter;
+	GMinPoolCount = FMath::Min(FreeDynamicDatas.Num(), GMinPoolCount);
+	if (FreeDynamicDatas.Num() > 0)
+	{
+		FDynamicData *Result = FreeDynamicDatas[0];
+		FreeDynamicDatas.RemoveAtSwap(0);
+		return Result;
+	}
+	else
+	{
+		return new FDynamicData;
+	}
 }
 
 void FInstancedSkinnedMeshObject::FDynamicData::Free(FDynamicData * Who)
 {
-	delete Who;
+	Who->Clear();
+	FScopeLock S(&FreeDynamicDatasCriticalSection);
+	FreeDynamicDatas.Add(Who);
+	if (GAllocationCounter > GAllocationsBeforeCleanup)
+	{
+		GAllocationCounter = 0;
+		for (int32 I = 0; I < GMinPoolCount; ++I)
+		{
+			delete FreeDynamicDatas[0];
+			FreeDynamicDatas.RemoveAtSwap(0);
+		}
+		GMinPoolCount = FreeDynamicDatas.Num();
+	}
 }
 
 FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh,
