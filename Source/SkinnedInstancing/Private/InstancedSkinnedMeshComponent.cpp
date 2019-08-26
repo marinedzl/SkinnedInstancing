@@ -84,9 +84,15 @@ namespace
 			void Release()
 			{
 				ensure(IsInRenderingThread());
+				BoneMap.SafeRelease();
 				BoneBuffer.SafeRelease();
 				InstanceTransformBuffer.SafeRelease();
 				InstanceAnimationBuffer.SafeRelease();
+			}
+
+			const FVertexBufferAndSRV& GetBoneMapForReading() const
+			{
+				return BoneMap;
 			}
 
 			const FVertexBufferAndSRV& GetBoneBufferForReading() const
@@ -102,6 +108,33 @@ namespace
 			const FVertexBufferAndSRV& GetInstanceAnimationBufferForReading() const
 			{
 				return InstanceAnimationBuffer;
+			}
+
+			bool UpdateBoneMap(const TArray<FBoneIndexType>& _BoneMap)
+			{
+				uint32 BufferSize = _BoneMap.Num() * sizeof(uint32);
+
+				if (!BoneMap.IsValid())
+				{
+					FRHIResourceCreateInfo CreateInfo;
+					BoneMap.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					BoneMap.VertexBufferSRV = RHICreateShaderResourceView(BoneMap.VertexBufferRHI, sizeof(uint32), PF_R32_UINT);
+				}
+
+				if (BoneMap.IsValid() && _BoneMap.Num() > 0)
+				{
+					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
+					uint32* LockedBuffer = (uint32*)RHILockVertexBuffer(BoneMap.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+
+					for (size_t i = 0; i < _BoneMap.Num(); i++)
+					{
+						LockedBuffer[i] = _BoneMap[i];
+					}
+
+					RHIUnlockVertexBuffer(BoneMap.VertexBufferRHI);
+				}
+
+				return true;
 			}
 
 			void InitBoneData(int InNumBones, const TArray<int>& InSequenceLength)
@@ -218,6 +251,7 @@ namespace
 			uint32 NumBones;
 			TArray<uint32> SequenceOffset;
 			TArray<uint32> SequenceLength;
+			FVertexBufferAndSRV BoneMap;
 			FVertexBufferAndSRV BoneBuffer;
 			FVertexBufferAndSRV InstanceTransformBuffer;
 			FVertexBufferAndSRV InstanceAnimationBuffer;
@@ -342,6 +376,7 @@ namespace
 	public:
 		virtual void Bind(const FShaderParameterMap& ParameterMap) override
 		{
+			BoneMap.Bind(ParameterMap, TEXT("BoneMap"));
 			BoneMatrices.Bind(ParameterMap, TEXT("BoneMatrices"));
 			InstanceMatrices.Bind(ParameterMap, TEXT("InstanceMatrices"));
 			InstanceAnimations.Bind(ParameterMap, TEXT("InstanceAnimations"));
@@ -349,6 +384,7 @@ namespace
 
 		virtual void Serialize(FArchive& Ar) override
 		{
+			Ar << BoneMap;
 			Ar << BoneMatrices;
 			Ar << InstanceMatrices;
 			Ar << InstanceAnimations;
@@ -366,6 +402,12 @@ namespace
 			FVertexInputStreamArray& VertexStreams) const override
 		{
 			const FGPUSkinVertexFactory::FShaderDataType& ShaderData = ((const FGPUSkinVertexFactory*)VertexFactory)->GetShaderData();
+
+			if (BoneMap.IsBound())
+			{
+				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetBoneMapForReading().VertexBufferSRV;
+				ShaderBindings.Add(BoneMap, CurrentData);
+			}
 
 			if (BoneMatrices.IsBound())
 			{
@@ -389,6 +431,7 @@ namespace
 		virtual uint32 GetSize() const override { return sizeof(*this); }
 
 	private:
+		FShaderResourceParameter BoneMap;
 		FShaderResourceParameter BoneMatrices;
 		FShaderResourceParameter InstanceMatrices;
 		FShaderResourceParameter InstanceAnimations;
@@ -467,7 +510,7 @@ public:
 	void UpdateDynamicData(FDynamicData* NewDynamicData);
 private:
 	void UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset,
-		UAnimSequence* AnimSequence, const TArray<FBoneIndexType>& BoneMap, const FBoneContainer* BoneContainer);
+		UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer);
 	void UpdateDynamicData_RenderThread(FDynamicData* NewDynamicData);
 private:
 	struct FSkeletalMeshObjectLOD;
@@ -631,7 +674,7 @@ FGPUSkinVertexFactory* FInstancedSkinnedMeshObject::GetSkinVertexFactory(int32 L
 	return LOD.VertexFactories[ChunkIdx].Get();
 }
 
-void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset, UAnimSequence* AnimSequence, const TArray<FBoneIndexType>& BoneMap, const FBoneContainer* BoneContainer)
+void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset, UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer)
 {
 	TArray<FMatrix> PoseData;
 
@@ -640,19 +683,19 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 	OutPose.SetBoneContainer(BoneContainer);
 	OutPose.ResetToRefPose();
 
+	int NumBones = SkeletalMesh->RefSkeleton.GetRawBoneNum();
 	int NumFrames = AnimSequence->GetNumberOfFrames();
 	float Interval = (NumFrames > 1) ? (AnimSequence->SequenceLength / (NumFrames - 1)) : MINIMUM_ANIMATION_LENGTH;
 
 	check(NumFrames > 0);
 
-	PoseData.AddUninitialized(BoneMap.Num() * NumFrames);
+	PoseData.AddUninitialized(NumBones * NumFrames);
 
 	for (int FrameIndex = 0; FrameIndex < NumFrames; FrameIndex++)
 	{
 		float Time = FrameIndex * Interval;
 		AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(Time));
 
-		int NumBones = SkeletalMesh->RefSkeleton.GetRawBoneNum();
 		TArray<FTransform> ComponentSpaceTransforms;
 
 		ComponentSpaceTransforms.AddUninitialized(NumBones);
@@ -683,11 +726,10 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 			checkSlow(!SpaceBase->ContainsNaN());
 		}
 
-		for (int BoneIndex = 0; BoneIndex < BoneMap.Num(); BoneIndex++)
+		for (int BoneIndex = 0; BoneIndex < NumBones; BoneIndex++)
 		{
-			const FBoneIndexType RefIndex = BoneMap[BoneIndex]; // Indices of bones in the USkeletalMesh::RefSkeleton array
-			int PoseDataOffset = SequenceOffset + BoneMap.Num() * FrameIndex + BoneIndex;
-			BoneMatrices[PoseDataOffset] = SkeletalMesh->RefBasesInvMatrix[RefIndex] * ComponentSpaceTransforms[RefIndex].ToMatrixWithScale();
+			int PoseDataOffset = SequenceOffset + NumBones * FrameIndex + BoneIndex;
+			BoneMatrices[PoseDataOffset] = SkeletalMesh->RefBasesInvMatrix[BoneIndex] * ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
 		}
 	}
 }
@@ -702,6 +744,8 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 	if (AnimSequences.Num() < 0)
 		return;
 
+	int NumBones = SkeletalMesh->RefSkeleton.GetRawBoneNum();
+
 	for (int32 LODIndex = 0; LODIndex < SkeletalMeshRenderData->LODRenderData.Num(); LODIndex++)
 	{
 		const FSkeletalMeshLODRenderData& LODData = SkeletalMeshRenderData->LODRenderData[LODIndex];
@@ -714,7 +758,8 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 		{
 			const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
 			FGPUSkinVertexFactory* VertexFactory = GetSkinVertexFactory(LODIndex, SectionIndex);
-			const TArray<FBoneIndexType>& BoneMap = Section.BoneMap;
+
+			VertexFactory->GetShaderData().UpdateBoneMap(Section.BoneMap);
 
 			int NumBoneMatrices = 0;
 			TArray<int> SequenceLengths;
@@ -722,10 +767,10 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 			for (int i = 0; i < AnimSequences.Num(); i++)
 			{
 				SequenceLengths[i] = AnimSequences[i]->GetNumberOfFrames();
-				NumBoneMatrices += SequenceLengths[i] * BoneMap.Num();
+				NumBoneMatrices += SequenceLengths[i] * NumBones;
 			}
 
-			VertexFactory->GetShaderData().InitBoneData(BoneMap.Num(), SequenceLengths);
+			VertexFactory->GetShaderData().InitBoneData(NumBones, SequenceLengths);
 
 			TArray<FMatrix> BoneMatrices;
 			BoneMatrices.AddUninitialized(NumBoneMatrices);
@@ -733,8 +778,8 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 			int SequenceOffset = 0;
 			for (int i = 0; i < AnimSequences.Num(); i++)
 			{
-				UpdateBoneData(BoneMatrices, SequenceOffset, AnimSequences[i], BoneMap, &BoneContainer);
-				SequenceOffset += AnimSequences[i]->GetNumberOfFrames() * BoneMap.Num();
+				UpdateBoneData(BoneMatrices, SequenceOffset, AnimSequences[i], &BoneContainer);
+				SequenceOffset += AnimSequences[i]->GetNumberOfFrames() * NumBones;
 			}
 
 			VertexFactory->GetShaderData().UpdateBoneData(BoneMatrices);

@@ -108,6 +108,7 @@ FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVS
 
 #define FBoneMatrix float3x4
 
+STRONG_TYPE Buffer<uint> BoneMap;
 STRONG_TYPE Buffer<float4> BoneMatrices;
 STRONG_TYPE Buffer<float4> InstanceMatrices;
 STRONG_TYPE Buffer<uint> InstanceAnimations;
@@ -138,12 +139,12 @@ FBoneMatrix GetBoneMatrixByInstanceAnimation(int InstanceId, int Layer, int Bone
 	float BlendWeight = 1;
 #endif
 	
-	FBoneMatrix Prev = GetBoneMatrixFromBuffer(PrevFrame + BoneId);
+	FBoneMatrix Prev = GetBoneMatrixFromBuffer(PrevFrame + BoneMap[BoneId]);
 	
 #if !INSTANCED_SKIN_DISABLE_FRAME_LERP
 	int NextFrame = InstanceAnimations[Index + 1];
 	float FrameLerp = InstanceAnimations[Index + 2] * 0.001f;
-	FBoneMatrix Next = GetBoneMatrixFromBuffer(NextFrame + BoneId);
+	FBoneMatrix Next = GetBoneMatrixFromBuffer(NextFrame + BoneMap[BoneId]);
 	return lerp(Prev, Next, FrameLerp) * BlendWeight;
 #else
 	return Prev * BlendWeight;
