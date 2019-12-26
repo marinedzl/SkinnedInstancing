@@ -1,10 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/SceneComponent.h"
 #include "InstancedSkeletalMeshComponent.generated.h"
 
 UCLASS(hidecategories = (Object, LOD), meta = (BlueprintSpawnableComponent), ClassGroup = Rendering)
-class ENGINE_API UInstancedSkeletalMeshComponent : public USceneComponent
+class SKINNEDINSTANCING_API UInstancedSkeletalMeshComponent : public USceneComponent
 {
 	GENERATED_UCLASS_BODY()
 

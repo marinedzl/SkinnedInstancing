@@ -5,8 +5,9 @@
 =============================================================================*/
 
 
-#include "VertexFactoryCommon.ush"
-#include "GpuSkinCommon.ush"
+//#include "VertexFactoryCommon.ush"
+//#include "GpuSkinCommon.ush"
+#include "/Engine/Public/Platform.ush"
 
 #ifndef INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES
 #define INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES 0 // default is 4 bones

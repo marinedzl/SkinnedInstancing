@@ -17,7 +17,7 @@
 		{
 			"Name": "SkinnedInstancing",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "PostConfigInit"
 		}
 	]
 }

@@ -1,4 +1,4 @@
-#include "Components/InstancedSkinnedMeshComponent.h"
+#include "InstancedSkinnedMeshComponent.h"
 #include "PrimitiveSceneProxy.h"
 #include "SkeletalMeshTypes.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -495,7 +495,7 @@ namespace
 	
 	FVertexFactoryType FGPUSkinVertexFactory::StaticType(
 		TEXT("InstancedSkinVertexFactory"),
-		TEXT("/Engine/Private/InstancedSkinVertexFactory.ush"),
+		TEXT("/Plugin/SkinnedInstancing/Private/InstancedSkinVertexFactory.ush"),
 		/*bool bInUsedWithMaterials =*/ true,
 		/*bool bInSupportsStaticLighting =*/ false,
 		/*bool bInSupportsDynamicLighting =*/ true,
