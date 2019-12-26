@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/MeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "InstancedSkinnedMeshComponent.generated.h"
 
 struct FInstancedSkinnedMeshInstanceData
@@ -56,7 +57,7 @@ public:
 
 	/** The skeletal mesh used by this component. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	class USkeletalMesh* SkeletalMesh;
+	USkeletalMesh* SkeletalMesh;
 
 	/** The AnimSequence used by this component. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")

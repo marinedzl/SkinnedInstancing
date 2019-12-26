@@ -1,4 +1,5 @@
 #include "InstancedSkinnedMeshComponent.h"
+#include "Classes/Materials/Material.h"
 #include "PrimitiveSceneProxy.h"
 #include "SkeletalMeshTypes.h"
 #include "Rendering/SkeletalMeshRenderData.h"
