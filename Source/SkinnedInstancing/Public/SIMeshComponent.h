@@ -20,7 +20,7 @@ struct FInstancedSkinnedMeshInstanceData
 };
 
 UCLASS(hidecategories = (Object, LOD), meta = (BlueprintSpawnableComponent), ClassGroup = Rendering)
-class SKINNEDINSTANCING_API UInstancedSkinnedMeshComponent : public UMeshComponent
+class SKINNEDINSTANCING_API USIMeshComponent : public UMeshComponent
 {
 	GENERATED_UCLASS_BODY()
 	

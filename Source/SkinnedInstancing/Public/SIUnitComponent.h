@@ -5,7 +5,7 @@
 #include "SIUnitComponent.generated.h"
 
 UCLASS(hidecategories = (Object, LOD), meta = (BlueprintSpawnableComponent), ClassGroup = Rendering)
-class SKINNEDINSTANCING_API UInstancedSkeletalMeshComponent : public USceneComponent
+class SKINNEDINSTANCING_API USIUnitComponent : public USceneComponent
 {
 	GENERATED_UCLASS_BODY()
 
@@ -13,7 +13,7 @@ class SKINNEDINSTANCING_API UInstancedSkeletalMeshComponent : public USceneCompo
 	TWeakObjectPtr<AActor> InstanceManagerObject;
 
 public:
-	virtual ~UInstancedSkeletalMeshComponent();
+	virtual ~USIUnitComponent();
 
 	//~ Override Functions
 protected:

@@ -782,6 +782,18 @@ void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread()
 		if (AnimSequences.Num() < 0)
 			return;
 
+		TArray<UAnimSequence*> AnimSequencesExist;
+		for (int i = 0; i < AnimSequences.Num(); i++)
+		{
+			if (AnimSequences[i])
+			{
+				AnimSequencesExist.Add(AnimSequences[i]);
+			}
+		}
+
+		if (AnimSequencesExist.Num() < 0)
+			return;
+
 		USkeleton* Skeleton = SkeletalMesh->Skeleton;
 
 		int NumBones = Skeleton->GetReferenceSkeleton().GetRawBoneNum();
@@ -794,10 +806,10 @@ void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread()
 
 		int NumBoneMatrices = 0;
 		TArray<int> SequenceLengths;
-		SequenceLengths.AddZeroed(AnimSequences.Num());
-		for (int i = 0; i < AnimSequences.Num(); i++)
+		SequenceLengths.AddZeroed(AnimSequencesExist.Num());
+		for (int i = 0; i < AnimSequencesExist.Num(); i++)
 		{
-			SequenceLengths[i] = AnimSequences[i]->GetNumberOfFrames();
+			SequenceLengths[i] = AnimSequencesExist[i]->GetNumberOfFrames();
 			NumBoneMatrices += SequenceLengths[i] * NumBones;
 		}
 
@@ -807,10 +819,10 @@ void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread()
 		BoneMatrices.AddUninitialized(NumBoneMatrices);
 
 		int SequenceOffset = 0;
-		for (int i = 0; i < AnimSequences.Num(); i++)
+		for (int i = 0; i < AnimSequencesExist.Num(); i++)
 		{
-			UpdateBoneData(BoneMatrices, SequenceOffset, AnimSequences[i], &BoneContainer);
-			SequenceOffset += AnimSequences[i]->GetNumberOfFrames() * NumBones;
+			UpdateBoneData(BoneMatrices, SequenceOffset, AnimSequencesExist[i], &BoneContainer);
+			SequenceOffset += AnimSequencesExist[i]->GetNumberOfFrames() * NumBones;
 		}
 
 		BoneData.UpdateBoneData_RenderThread(BoneMatrices);
@@ -852,7 +864,7 @@ void FInstancedSkinnedMeshObject::UpdateDynamicData_RenderThread(FDynamicData * 
 class FInstancedSkinnedMeshSceneProxy final : public FPrimitiveSceneProxy
 {
 public:
-	FInstancedSkinnedMeshSceneProxy(UInstancedSkinnedMeshComponent* Component, 
+	FInstancedSkinnedMeshSceneProxy(USIMeshComponent* Component, 
 		USkeletalMesh* SkeletalMesh, FInstancedSkinnedMeshObject* MeshObject);
 	virtual ~FInstancedSkinnedMeshSceneProxy();
 
@@ -887,7 +899,7 @@ private:
 		int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData, int32 MaxNumInstances) const;
 
 private:
-	UInstancedSkinnedMeshComponent* Component;
+	USIMeshComponent* Component;
 	UBodySetup* BodySetup;
 	FMaterialRelevance MaterialRelevance;
 	TEnumAsByte<ERHIFeatureLevel::Type> FeatureLevel;
@@ -896,7 +908,7 @@ private:
 	FSkeletalMeshRenderData* SkeletalMeshRenderData;
 };
 
-FInstancedSkinnedMeshSceneProxy::FInstancedSkinnedMeshSceneProxy(UInstancedSkinnedMeshComponent * Component,
+FInstancedSkinnedMeshSceneProxy::FInstancedSkinnedMeshSceneProxy(USIMeshComponent * Component,
 	USkeletalMesh* SkeletalMesh, FInstancedSkinnedMeshObject* MeshObject)
 	: FPrimitiveSceneProxy(Component, Component->SkeletalMesh->GetFName())
 	, Component(Component)
@@ -1031,6 +1043,9 @@ int32 GetMinDesiredLODLevel(USkeletalMesh* SkeletalMesh, const FSceneView* View,
 void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views,
 	const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
 {
+	if (!MeshObject)
+		return;
+
 	auto DynamicData = MeshObject->GetDynamicData();
 	if (!DynamicData || DynamicData->InstanceDatas.Num() <= 0)
 		return;
@@ -1090,10 +1105,10 @@ void FInstancedSkinnedMeshSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInt
 }
 
 //=========================================================
-//		UInstancedSkinnedMeshComponent
+//		USIMeshComponent
 //=========================================================
 
-UInstancedSkinnedMeshComponent::UInstancedSkinnedMeshComponent(const FObjectInitializer& ObjectInitializer)
+USIMeshComponent::USIMeshComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	bAutoActivate = true;
@@ -1103,7 +1118,7 @@ UInstancedSkinnedMeshComponent::UInstancedSkinnedMeshComponent(const FObjectInit
 	InstanceIdIncrease = 0;
 }
 
-FPrimitiveSceneProxy* UInstancedSkinnedMeshComponent::CreateSceneProxy()
+FPrimitiveSceneProxy* USIMeshComponent::CreateSceneProxy()
 {
 	FInstancedSkinnedMeshSceneProxy* Result = nullptr;
 	FSkeletalMeshRenderData* SkelMeshRenderData = SkeletalMesh ? SkeletalMesh->GetResourceForRendering() : nullptr;
@@ -1117,7 +1132,7 @@ FPrimitiveSceneProxy* UInstancedSkinnedMeshComponent::CreateSceneProxy()
 	return Result;
 }
 
-int32 UInstancedSkinnedMeshComponent::GetNumMaterials() const
+int32 USIMeshComponent::GetNumMaterials() const
 {
 	if (SkeletalMesh)
 	{
@@ -1127,7 +1142,7 @@ int32 UInstancedSkinnedMeshComponent::GetNumMaterials() const
 	return 0;
 }
 
-FBoxSphereBounds UInstancedSkinnedMeshComponent::CalcBounds(const FTransform & BoundTransform) const
+FBoxSphereBounds USIMeshComponent::CalcBounds(const FTransform & BoundTransform) const
 {
 	if (SkeletalMesh && PerInstanceSMData.Num() > 0)
 	{
@@ -1156,19 +1171,19 @@ FBoxSphereBounds UInstancedSkinnedMeshComponent::CalcBounds(const FTransform & B
 	}
 }
 
-void UInstancedSkinnedMeshComponent::OnRegister()
+void USIMeshComponent::OnRegister()
 {
 	Super::OnRegister();
 }
 
-void UInstancedSkinnedMeshComponent::OnUnregister()
+void USIMeshComponent::OnUnregister()
 {
 	Super::OnUnregister();
 }
 
-void UInstancedSkinnedMeshComponent::CreateRenderState_Concurrent()
+void USIMeshComponent::CreateRenderState_Concurrent()
 {
-	if (SkeletalMesh && AnimSequences.Num() > 0)
+	if (SkeletalMesh && AnimSequences.Num() > 0 && AnimSequences[0])
 	{
 		ERHIFeatureLevel::Type SceneFeatureLevel = GetWorld()->FeatureLevel;
 
@@ -1179,24 +1194,24 @@ void UInstancedSkinnedMeshComponent::CreateRenderState_Concurrent()
 		if (FApp::CanEverRender() && ShouldComponentAddToScene())
 		{
 			MeshObject = ::new FInstancedSkinnedMeshObject(SkeletalMesh, SceneFeatureLevel, AnimSequences);
+
+			MeshObject->UpdateBoneData();
 		}
 	}
-
-	MeshObject->UpdateBoneData();
 
 	UpdateMeshObejctDynamicData();
 
 	Super::CreateRenderState_Concurrent();
 }
 
-void UInstancedSkinnedMeshComponent::SendRenderDynamicData_Concurrent()
+void USIMeshComponent::SendRenderDynamicData_Concurrent()
 {
 	Super::SendRenderDynamicData_Concurrent();
 
 	UpdateMeshObejctDynamicData();
 }
 
-void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
+void USIMeshComponent::DestroyRenderState_Concurrent()
 {
 	Super::DestroyRenderState_Concurrent();
 
@@ -1213,7 +1228,7 @@ void UInstancedSkinnedMeshComponent::DestroyRenderState_Concurrent()
 	}
 }
 
-void UInstancedSkinnedMeshComponent::UpdateMeshObejctDynamicData()
+void USIMeshComponent::UpdateMeshObejctDynamicData()
 {
 	if (MeshObject)
 	{
@@ -1225,7 +1240,7 @@ void UInstancedSkinnedMeshComponent::UpdateMeshObejctDynamicData()
 	}
 }
 
-int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & Transform)
+int32 USIMeshComponent::AddInstance(const FTransform & Transform)
 {
 	int Id = ++InstanceIdIncrease;
 	FInstancedSkinnedMeshInstanceData NewInstanceData;
@@ -1241,25 +1256,25 @@ int32 UInstancedSkinnedMeshComponent::AddInstance(const FTransform & Transform)
 	return Id;
 }
 
-void UInstancedSkinnedMeshComponent::RemoveInstance(int Id)
+void USIMeshComponent::RemoveInstance(int Id)
 {
 	PerInstanceSMData.Remove(Id);
 	MarkRenderStateDirty();
 }
 
-UAnimSequence * UInstancedSkinnedMeshComponent::GetSequence(int Id)
+UAnimSequence * USIMeshComponent::GetSequence(int Id)
 {
 	if (Id >= AnimSequences.Num())
 		return nullptr;
 	return AnimSequences[Id];
 }
 
-FInstancedSkinnedMeshInstanceData* UInstancedSkinnedMeshComponent::GetInstanceData(int Id)
+FInstancedSkinnedMeshInstanceData* USIMeshComponent::GetInstanceData(int Id)
 {
 	return PerInstanceSMData.Find(Id);
 }
 
-void UInstancedSkinnedMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
+void USIMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
 {
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);

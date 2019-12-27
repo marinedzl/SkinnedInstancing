@@ -4,7 +4,7 @@
 
 #pragma optimize( "", off )
 
-class UInstancedSkeletalMeshComponent::FAnimtionPlayer
+class USIUnitComponent::FAnimtionPlayer
 {
 public:
 	struct Sequence
@@ -82,7 +82,7 @@ private:
 namespace
 {
 	void GetInstanceDataFromPlayer(FInstancedSkinnedMeshInstanceData::FAnimData& Data, 
-		const UInstancedSkeletalMeshComponent::FAnimtionPlayer::Sequence& Seq)
+		const USIUnitComponent::FAnimtionPlayer::Sequence& Seq)
 	{
 		int NumFrames = Seq.NumFrames;
 		float SequenceLength = Seq.Length;
@@ -99,7 +99,7 @@ namespace
 	}
 }
 
-UInstancedSkeletalMeshComponent::UInstancedSkeletalMeshComponent(const FObjectInitializer& ObjectInitializer)
+USIUnitComponent::USIUnitComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	bAutoActivate = true;
@@ -111,24 +111,24 @@ UInstancedSkeletalMeshComponent::UInstancedSkeletalMeshComponent(const FObjectIn
 	AnimtionPlayer = new FAnimtionPlayer();
 }
 
-UInstancedSkeletalMeshComponent::~UInstancedSkeletalMeshComponent()
+USIUnitComponent::~USIUnitComponent()
 {
 	delete AnimtionPlayer;
 }
 
-void UInstancedSkeletalMeshComponent::BeginPlay()
+void USIUnitComponent::BeginPlay()
 {
 	Super::BeginPlay();
 }
 
-void UInstancedSkeletalMeshComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void USIUnitComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
 	if (InstanceId > 0 && InstanceManagerObject.IsValid())
 	{
-		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
 			);
 		if (InstanceManager)
 		{
@@ -137,12 +137,12 @@ void UInstancedSkeletalMeshComponent::EndPlay(const EEndPlayReason::Type EndPlay
 	}
 }
 
-void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength, bool Loop)
+void USIUnitComponent::CrossFade(int Sequence, float FadeLength, bool Loop)
 {
 	if (InstanceManagerObject.IsValid())
 	{
-		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
 			);
 		if (InstanceManager)
 		{
@@ -157,15 +157,15 @@ void UInstancedSkeletalMeshComponent::CrossFade(int Sequence, float FadeLength, 
 	}
 }
 
-void UInstancedSkeletalMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
+void USIUnitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
 {
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	if (InstanceId <= 0 && InstanceManagerObject.IsValid())
 	{
-		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
 			);
 		if (InstanceManager)
 		{
@@ -177,8 +177,8 @@ void UInstancedSkeletalMeshComponent::TickComponent(float DeltaTime, ELevelTick 
 
 	if (InstanceManagerObject.IsValid() && InstanceId > 0)
 	{
-		UInstancedSkinnedMeshComponent* InstanceManager = Cast<UInstancedSkinnedMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(UInstancedSkinnedMeshComponent::StaticClass())
+		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
+			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
 			);
 		if (InstanceManager)
 		{
