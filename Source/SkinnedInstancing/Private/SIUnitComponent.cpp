@@ -1,6 +1,6 @@
-#include "InstancedSkeletalMeshComponent.h"
+#include "SIUnitComponent.h"
 #include "Animation/AnimSequence.h"
-#include "InstancedSkinnedMeshComponent.h"
+#include "SIMeshComponent.h"
 
 #pragma optimize( "", off )
 

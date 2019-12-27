@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
-#include "InstancedSkeletalMeshComponent.generated.h"
+#include "SIUnitComponent.generated.h"
 
 UCLASS(hidecategories = (Object, LOD), meta = (BlueprintSpawnableComponent), ClassGroup = Rendering)
 class SKINNEDINSTANCING_API UInstancedSkeletalMeshComponent : public USceneComponent

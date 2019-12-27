@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/MeshComponent.h"
 #include "Engine/SkeletalMesh.h"
-#include "InstancedSkinnedMeshComponent.generated.h"
+#include "SIMeshComponent.generated.h"
 
 struct FInstancedSkinnedMeshInstanceData
 {

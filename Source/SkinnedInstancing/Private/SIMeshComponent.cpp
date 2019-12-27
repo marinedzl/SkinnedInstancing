@@ -1,4 +1,4 @@
-#include "InstancedSkinnedMeshComponent.h"
+#include "SIMeshComponent.h"
 #include "Classes/Materials/Material.h"
 #include "PrimitiveSceneProxy.h"
 #include "SkeletalMeshTypes.h"
