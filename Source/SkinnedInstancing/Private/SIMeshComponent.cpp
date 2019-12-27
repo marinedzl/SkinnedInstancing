@@ -159,6 +159,7 @@ namespace
 			{
 				ensure(IsInRenderingThread());
 				BoneMap.SafeRelease();
+				RefBasesInvMatrix.SafeRelease();
 				InstanceTransformBuffer.SafeRelease();
 				InstanceAnimationBuffer.SafeRelease();
 			}
@@ -166,6 +167,11 @@ namespace
 			const FVertexBufferAndSRV& GetBoneMapForReading() const
 			{
 				return BoneMap;
+			}
+
+			const FVertexBufferAndSRV& GetRefBasesInvMatrixForReading() const
+			{
+				return RefBasesInvMatrix;
 			}
 
 			const FVertexBufferAndSRV& GetBoneBufferForReading() const
@@ -205,6 +211,38 @@ namespace
 					}
 
 					RHIUnlockVertexBuffer(BoneMap.VertexBufferRHI);
+				}
+
+				return true;
+			}
+
+			bool UpdateRefBasesInvMatrix(const TArray<FMatrix>& BoneMatrices)
+			{
+				uint32 BufferSize = BoneMatrices.Num() * 3 * sizeof(FVector4);
+
+				if (!RefBasesInvMatrix.IsValid())
+				{
+					FRHIResourceCreateInfo CreateInfo;
+					RefBasesInvMatrix.VertexBufferRHI = RHICreateVertexBuffer(BufferSize, (BUF_Dynamic | BUF_ShaderResource), CreateInfo);
+					RefBasesInvMatrix.VertexBufferSRV = RHICreateShaderResourceView(RefBasesInvMatrix.VertexBufferRHI, sizeof(FVector4), PF_A32B32G32R32F);
+				}
+
+				if (RefBasesInvMatrix.IsValid() && BoneMatrices.Num() > 0)
+				{
+					const int32 PreFetchStride = 2; // FPlatformMisc::Prefetch stride
+					FMatrix3x4* LockedBuffer = (FMatrix3x4*)RHILockVertexBuffer(RefBasesInvMatrix.VertexBufferRHI, 0, BufferSize, RLM_WriteOnly);
+
+					for (size_t i = 0; i < BoneMatrices.Num(); i++)
+					{
+						FPlatformMisc::Prefetch(BoneMatrices.GetData() + i + PreFetchStride);
+						FPlatformMisc::Prefetch(BoneMatrices.GetData() + i + PreFetchStride, PLATFORM_CACHE_LINE_SIZE);
+
+						FMatrix3x4& BoneMat = LockedBuffer[i];
+						const FMatrix& RefToLocal = BoneMatrices[i];
+						RefToLocal.To3x4MatrixTranspose((float*)BoneMat.M);
+					}
+
+					RHIUnlockVertexBuffer(RefBasesInvMatrix.VertexBufferRHI);
 				}
 
 				return true;
@@ -286,6 +324,7 @@ namespace
 		private:
 			const FAnimationData* BoneData = nullptr;
 			FVertexBufferAndSRV BoneMap;
+			FVertexBufferAndSRV RefBasesInvMatrix;
 			FVertexBufferAndSRV InstanceTransformBuffer;
 			FVertexBufferAndSRV InstanceAnimationBuffer;
 		};
@@ -410,6 +449,7 @@ namespace
 		virtual void Bind(const FShaderParameterMap& ParameterMap) override
 		{
 			BoneMap.Bind(ParameterMap, TEXT("BoneMap"));
+			RefBasesInvMatrix.Bind(ParameterMap, TEXT("RefBasesInvMatrix"));
 			BoneMatrices.Bind(ParameterMap, TEXT("BoneMatrices"));
 			InstanceMatrices.Bind(ParameterMap, TEXT("InstanceMatrices"));
 			InstanceAnimations.Bind(ParameterMap, TEXT("InstanceAnimations"));
@@ -418,6 +458,7 @@ namespace
 		virtual void Serialize(FArchive& Ar) override
 		{
 			Ar << BoneMap;
+			Ar << RefBasesInvMatrix;
 			Ar << BoneMatrices;
 			Ar << InstanceMatrices;
 			Ar << InstanceAnimations;
@@ -440,6 +481,12 @@ namespace
 			{
 				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetBoneMapForReading().VertexBufferSRV;
 				ShaderBindings.Add(BoneMap, CurrentData);
+			}
+
+			if (RefBasesInvMatrix.IsBound())
+			{
+				FShaderResourceViewRHIParamRef CurrentData = ShaderData.GetRefBasesInvMatrixForReading().VertexBufferSRV;
+				ShaderBindings.Add(RefBasesInvMatrix, CurrentData);
 			}
 
 			if (BoneMatrices.IsBound())
@@ -465,6 +512,7 @@ namespace
 
 	private:
 		FShaderResourceParameter BoneMap;
+		FShaderResourceParameter RefBasesInvMatrix;
 		FShaderResourceParameter BoneMatrices;
 		FShaderResourceParameter InstanceMatrices;
 		FShaderResourceParameter InstanceAnimations;
@@ -716,7 +764,9 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 	OutPose.SetBoneContainer(BoneContainer);
 	OutPose.ResetToRefPose();
 
-	int NumBones = SkeletalMesh->RefSkeleton.GetRawBoneNum();
+	const FReferenceSkeleton& RefSkeleton = BoneContainer->GetReferenceSkeleton();
+
+	int NumBones = RefSkeleton.GetRawBoneNum();
 	int NumFrames = AnimSequence->GetNumberOfFrames();
 	float Interval = (NumFrames > 1) ? (AnimSequence->SequenceLength / (NumFrames - 1)) : MINIMUM_ANIMATION_LENGTH;
 
@@ -743,7 +793,7 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 		for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
 		{
 			// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
-			const int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
+			const int32 ParentIndex = RefSkeleton.GetParentIndex(BoneIndex);
 			FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
 			FPlatformMisc::Prefetch(ParentSpaceBase);
 
@@ -760,7 +810,7 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 		for (int BoneIndex = 0; BoneIndex < NumBones; BoneIndex++)
 		{
 			int PoseDataOffset = SequenceOffset + NumBones * FrameIndex + BoneIndex;
-			BoneMatrices[PoseDataOffset] = SkeletalMesh->RefBasesInvMatrix[BoneIndex] * ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
+			BoneMatrices[PoseDataOffset] = ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
 		}
 	}
 }
@@ -838,7 +888,15 @@ void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread()
 			FGPUSkinVertexFactory* VertexFactory = GetSkinVertexFactory(LODIndex, SectionIndex);
 
 			VertexFactory->GetShaderData().UpdateBoneData(&BoneData);
-			VertexFactory->GetShaderData().UpdateBoneMap(Section.BoneMap);
+
+			const TArray<FBoneIndexType>& BoneMap = Section.BoneMap;
+			VertexFactory->GetShaderData().UpdateBoneMap(BoneMap);
+
+			TArray<FMatrix> RefBasesInvMatrix;
+			for (int BoneIndex = 0; BoneIndex < BoneMap.Num(); BoneIndex++)
+				RefBasesInvMatrix.Add(SkeletalMesh->RefBasesInvMatrix[BoneMap[BoneIndex]]);
+
+			VertexFactory->GetShaderData().UpdateRefBasesInvMatrix(RefBasesInvMatrix);
 		}
 	}
 }
