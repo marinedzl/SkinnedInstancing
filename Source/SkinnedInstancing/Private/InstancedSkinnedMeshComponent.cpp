@@ -52,7 +52,7 @@ namespace
 		FShaderResourceViewRHIRef VertexBufferSRV;
 	};
 
-	class FBoneDataType : public FRenderResource
+	class FAnimationData : public FRenderResource
 	{
 	public:
 		virtual void ReleaseDynamicRHI() override
@@ -66,7 +66,7 @@ namespace
 			return BoneBuffer;
 		}
 
-		void InitBoneData(int InNumBones, const TArray<int>& InSequenceLength)
+		void Init(int InNumBones, const TArray<int>& InSequenceLength)
 		{
 			NumBones = InNumBones;
 			SequenceLength.Append(InSequenceLength);
@@ -80,7 +80,7 @@ namespace
 			}
 		}
 
-		bool UpdateBoneData(const TArray<FMatrix>& ReferenceToLocalMatrices)
+		bool UpdateBoneData_RenderThread(const TArray<FMatrix>& ReferenceToLocalMatrices)
 		{
 			uint32 BufferSize = ReferenceToLocalMatrices.Num() * 3 * sizeof(FVector4);
 
@@ -210,7 +210,7 @@ namespace
 				return true;
 			}
 
-			void UpdateBoneData(const FBoneDataType* BoneData)
+			void UpdateBoneData(const FAnimationData* BoneData)
 			{
 				this->BoneData = BoneData;
 			}
@@ -284,7 +284,7 @@ namespace
 				return true;
 			}
 		private:
-			const FBoneDataType* BoneData = nullptr;
+			const FAnimationData* BoneData = nullptr;
 			FVertexBufferAndSRV BoneMap;
 			FVertexBufferAndSRV InstanceTransformBuffer;
 			FVertexBufferAndSRV InstanceAnimationBuffer;
@@ -538,13 +538,14 @@ public:
 public:
 	virtual void ReleaseResources();
 	FGPUSkinVertexFactory* GetSkinVertexFactory(int32 LODIndex, int32 ChunkIdx) const;
-	void UpdateBoneDataDeferred();
+	void UpdateBoneData();
 	const FDynamicData* GetDynamicData() const { return DynamicData; }
 	void UpdateDynamicData(FDynamicData* NewDynamicData);
 private:
 	void UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset,
 		UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer);
 	void UpdateDynamicData_RenderThread(FDynamicData* NewDynamicData);
+	void UpdateBoneData_RenderThread();
 private:
 	struct FSkeletalMeshObjectLOD;
 private:
@@ -552,10 +553,9 @@ private:
 	class USkeletalMesh* SkeletalMesh;
 	FSkeletalMeshRenderData* SkeletalMeshRenderData;
 	TArray<FSkeletalMeshObjectLOD> LODs;
-	bool bBoneDataUpdated;
 	TArray<UAnimSequence*> AnimSequences;
 	FDynamicData* DynamicData;
-	FBoneDataType BoneData;
+	FAnimationData BoneData;
 public:
 	TArray<TArray<FInstancedSkinnedMeshInstanceData>> TempLODInstanceDatas;
 };
@@ -665,7 +665,6 @@ FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* Skeletal
 	: FeatureLevel(FeatureLevel)
 	, SkeletalMesh(SkeletalMesh)
 	, SkeletalMeshRenderData(SkeletalMesh->GetResourceForRendering())
-	, bBoneDataUpdated(false)
 	, DynamicData(nullptr)
 {
 	// create LODs to match the base mesh
@@ -712,8 +711,6 @@ FGPUSkinVertexFactory* FInstancedSkinnedMeshObject::GetSkinVertexFactory(int32 L
 
 void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset, UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer)
 {
-	TArray<FMatrix> PoseData;
-
 	FCompactPose OutPose;
 	FBlendedCurve OutCurve;
 	OutPose.SetBoneContainer(BoneContainer);
@@ -724,8 +721,6 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 	float Interval = (NumFrames > 1) ? (AnimSequence->SequenceLength / (NumFrames - 1)) : MINIMUM_ANIMATION_LENGTH;
 
 	check(NumFrames > 0);
-
-	PoseData.AddUninitialized(NumBones * NumFrames);
 
 	for (int FrameIndex = 0; FrameIndex < NumFrames; FrameIndex++)
 	{
@@ -770,24 +765,32 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 	}
 }
 
-void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
+void FInstancedSkinnedMeshObject::UpdateBoneData()
 {
-	if (bBoneDataUpdated)
-		return;
+	// queue a call to update this data
+	ENQUEUE_RENDER_COMMAND(InstancedSkinnedMeshObjectUpdateDataCommand)(
+		[this](FRHICommandListImmediate& RHICmdList)
+	{
+		UpdateBoneData_RenderThread();
+	}
+	);
+}
 
-	bBoneDataUpdated = true;
-
+void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread()
+{
 	{
 		if (AnimSequences.Num() < 0)
 			return;
 
-		int NumBones = SkeletalMesh->RefSkeleton.GetRawBoneNum();
+		USkeleton* Skeleton = SkeletalMesh->Skeleton;
+
+		int NumBones = Skeleton->GetReferenceSkeleton().GetRawBoneNum();
 
 		FBoneContainer BoneContainer;
 		TArray<FBoneIndexType> RequiredBones;
 		for (int i = 0; i < NumBones; i++)
 			RequiredBones.Add(i);
-		BoneContainer.InitializeTo(RequiredBones, FCurveEvaluationOption(), *SkeletalMesh);
+		BoneContainer.InitializeTo(RequiredBones, FCurveEvaluationOption(), *Skeleton);
 
 		int NumBoneMatrices = 0;
 		TArray<int> SequenceLengths;
@@ -798,7 +801,7 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 			NumBoneMatrices += SequenceLengths[i] * NumBones;
 		}
 
-		BoneData.InitBoneData(NumBones, SequenceLengths);
+		BoneData.Init(NumBones, SequenceLengths);
 
 		TArray<FMatrix> BoneMatrices;
 		BoneMatrices.AddUninitialized(NumBoneMatrices);
@@ -810,7 +813,7 @@ void FInstancedSkinnedMeshObject::UpdateBoneDataDeferred()
 			SequenceOffset += AnimSequences[i]->GetNumberOfFrames() * NumBones;
 		}
 
-		BoneData.UpdateBoneData(BoneMatrices);
+		BoneData.UpdateBoneData_RenderThread(BoneMatrices);
 	}
 
 	for (int32 LODIndex = 0; LODIndex < SkeletalMeshRenderData->LODRenderData.Num(); LODIndex++)
@@ -1032,9 +1035,6 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 	if (!DynamicData || DynamicData->InstanceDatas.Num() <= 0)
 		return;
 
-	// UpdateBoneDataDeferred 
-	MeshObject->UpdateBoneDataDeferred();
-
 	auto& LODInstanceDatas = MeshObject->TempLODInstanceDatas;
 
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
@@ -1181,6 +1181,8 @@ void UInstancedSkinnedMeshComponent::CreateRenderState_Concurrent()
 			MeshObject = ::new FInstancedSkinnedMeshObject(SkeletalMesh, SceneFeatureLevel, AnimSequences);
 		}
 	}
+
+	MeshObject->UpdateBoneData();
 
 	UpdateMeshObejctDynamicData();
 
