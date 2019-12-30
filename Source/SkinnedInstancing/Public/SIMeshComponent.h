@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/MeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "SIAnimationComponent.h"
 #include "SIMeshComponent.generated.h"
 
 struct FInstancedSkinnedMeshInstanceData
@@ -59,9 +60,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
 	USkeletalMesh* SkeletalMesh;
 
-	/** The AnimSequence used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
-	TArray<class UAnimSequence*> AnimSequences;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instances")
+	TWeakObjectPtr<USIAnimationComponent> AnimationComponent;
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FInstancedSkinnedMeshObject* MeshObject;

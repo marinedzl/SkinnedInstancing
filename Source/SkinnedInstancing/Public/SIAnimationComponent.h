@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
+#include "Animation/Skeleton.h"
+#include "Animation/AnimSequence.h"
 #include "SIAnimationComponent.generated.h"
 
 class FSIAnimationData;
@@ -12,12 +14,15 @@ class SKINNEDINSTANCING_API USIAnimationComponent : public USceneComponent
 	GENERATED_UCLASS_BODY()
 
 	/** The Skeleton used by this component. */
-	UPROPERTY(Category = Mesh, AssetRegistrySearchable, VisibleAnywhere, BlueprintReadOnly)
-	class USkeleton* Skeleton;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	USkeleton* Skeleton;
 
 	/** The AnimSequence used by this component. */
-	UPROPERTY(Category = Mesh, AssetRegistrySearchable, VisibleAnywhere, BlueprintReadOnly)
-	TArray<class UAnimSequence*> AnimSequences;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	TArray<UAnimSequence*> AnimSequences;
+
+	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkeletalMesh")
+	UAnimSequence* GetSequence(int Id);
 
 public:
 	virtual ~USIAnimationComponent();

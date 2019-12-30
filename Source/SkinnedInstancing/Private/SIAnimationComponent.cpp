@@ -1,7 +1,5 @@
 #include "SIAnimationComponent.h"
 #include "BonePose.h"
-#include "Animation/Skeleton.h"
-#include "Animation/AnimSequence.h"
 #include "SIAnimationData.h"
 
 #pragma optimize( "", off )
@@ -12,6 +10,13 @@ USIAnimationComponent::USIAnimationComponent(const FObjectInitializer& ObjectIni
 	bAutoActivate = true;
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
+
+UAnimSequence * USIAnimationComponent::GetSequence(int Id)
+{
+	if (Id >= AnimSequences.Num())
+		return nullptr;
+	return AnimSequences[Id];
 }
 
 USIAnimationComponent::~USIAnimationComponent()
