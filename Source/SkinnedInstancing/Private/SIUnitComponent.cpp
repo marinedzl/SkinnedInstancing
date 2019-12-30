@@ -81,7 +81,7 @@ private:
 
 namespace
 {
-	void GetInstanceDataFromPlayer(FInstancedSkinnedMeshInstanceData::FAnimData& Data, 
+	void GetInstanceDataFromPlayer(FSIMeshInstanceData::FAnimData& Data,
 		const USIUnitComponent::FAnimtionPlayer::Sequence& Seq)
 	{
 		int NumFrames = Seq.NumFrames;
@@ -182,7 +182,7 @@ void USIUnitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 			);
 		if (InstanceManager)
 		{
-			FInstancedSkinnedMeshInstanceData* Instance = InstanceManager->GetInstanceData(InstanceId);
+			FSIMeshInstanceData* Instance = InstanceManager->GetInstanceData(InstanceId);
 			check(Instance);
 			Instance->Transform = GetComponentTransform().ToMatrixWithScale();
 

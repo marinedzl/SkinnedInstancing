@@ -6,7 +6,7 @@
 #include "SIAnimationComponent.h"
 #include "SIMeshComponent.generated.h"
 
-struct FInstancedSkinnedMeshInstanceData
+struct FSIMeshInstanceData
 {
 	struct FAnimData
 	{
@@ -64,13 +64,13 @@ public:
 	TWeakObjectPtr<USIAnimationComponent> AnimationComponent;
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
-	class FInstancedSkinnedMeshObject* MeshObject;
+	class FSIMeshObject* MeshObject;
 
 private:
 	void UpdateMeshObejctDynamicData();
 
 private:
-	TMap<int, FInstancedSkinnedMeshInstanceData> PerInstanceSMData;
+	TMap<int, FSIMeshInstanceData> PerInstanceSMData;
 	int InstanceIdIncrease;
 
 public:
@@ -80,8 +80,8 @@ public:
 	
 	UAnimSequence* GetSequence(int Id);
 
-	FInstancedSkinnedMeshInstanceData* GetInstanceData(int Id);
+	FSIMeshInstanceData* GetInstanceData(int Id);
 
 private:
-	friend class FInstancedSkinnedMeshSceneProxy;
+	friend class FSIMeshSceneProxy;
 };

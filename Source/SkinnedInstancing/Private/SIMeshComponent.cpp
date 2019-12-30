@@ -11,20 +11,20 @@
 #pragma optimize( "", off )
 namespace
 {
-	static TAutoConsoleVariable<int32> CVarInstancedSkinLimit2BoneInfluences(
-		TEXT("r.InstancedSkin.Limit2BoneInfluences"),
+	static TAutoConsoleVariable<int32> CVarSkinnedInstancingLimit2BoneInfluences(
+		TEXT("r.SkinnedInstancing.Limit2BoneInfluences"),
 		0,
 		TEXT("Whether to use 2 bones influence instead of default 4 for GPU skinning. Cannot be changed at runtime."),
 		ECVF_ReadOnly);
 
-	static TAutoConsoleVariable<int32> CVarInstancedSkinDisableAnimationBlend(
-		TEXT("r.InstancedSkin.DisableAnimationBlend"),
+	static TAutoConsoleVariable<int32> CVarSkinnedInstancingDisableAnimationBlend(
+		TEXT("r.SkinnedInstancing.DisableAnimationBlend"),
 		0,
 		TEXT("Whether to use animation blend. Cannot be changed at runtime."),
 		ECVF_ReadOnly);
 
-	static TAutoConsoleVariable<int32> CVarInstancedSkinDisableFrameLerp(
-		TEXT("r.InstancedSkin.DisableFrameLerp"),
+	static TAutoConsoleVariable<int32> CVarSkinnedInstancingDisableFrameLerp(
+		TEXT("r.SkinnedInstancing.DisableFrameLerp"),
 		0,
 		TEXT("Whether to use frame lerp. Cannot be changed at runtime."),
 		ECVF_ReadOnly);
@@ -181,7 +181,7 @@ namespace
 				this->BoneData = BoneData;
 			}
 
-			bool UpdateInstanceData(const TArray<FInstancedSkinnedMeshInstanceData>& InstanceData, int MaxNumInstances)
+			bool UpdateInstanceData(const TArray<FSIMeshInstanceData>& InstanceData, int MaxNumInstances)
 			{
 				const uint32 NumInstances = InstanceData.Num();
 				uint32 BufferSize = NumInstances * 4 * sizeof(FVector4);
@@ -460,19 +460,19 @@ namespace
 	{
 		FVertexFactory::ModifyCompilationEnvironment(Type, Platform, Material, OutEnvironment);
 
-		bool bLimit2BoneInfluences = (CVarInstancedSkinLimit2BoneInfluences.GetValueOnAnyThread() != 0);
-		OutEnvironment.SetDefine(TEXT("INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES"), (bLimit2BoneInfluences ? 1 : 0));
+		bool bLimit2BoneInfluences = (CVarSkinnedInstancingLimit2BoneInfluences.GetValueOnAnyThread() != 0);
+		OutEnvironment.SetDefine(TEXT("SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES"), (bLimit2BoneInfluences ? 1 : 0));
 
-		bool bDisableAnimationBlend = (CVarInstancedSkinDisableAnimationBlend.GetValueOnAnyThread() != 0);
-		OutEnvironment.SetDefine(TEXT("INSTANCED_SKIN_DISABLE_ANIMATION_BLEND"), (bDisableAnimationBlend ? 1 : 0));
+		bool bDisableAnimationBlend = (CVarSkinnedInstancingDisableAnimationBlend.GetValueOnAnyThread() != 0);
+		OutEnvironment.SetDefine(TEXT("SKINNED_INSTANCING_DISABLE_ANIMATION_BLEND"), (bDisableAnimationBlend ? 1 : 0));
 
-		bool bDisableFrameLerp = (CVarInstancedSkinDisableFrameLerp.GetValueOnAnyThread() != 0);
-		OutEnvironment.SetDefine(TEXT("INSTANCED_SKIN_DISABLE_FRAME_LERP"), (bDisableFrameLerp ? 1 : 0));
+		bool bDisableFrameLerp = (CVarSkinnedInstancingDisableFrameLerp.GetValueOnAnyThread() != 0);
+		OutEnvironment.SetDefine(TEXT("SKINNED_INSTANCING_DISABLE_FRAME_LERP"), (bDisableFrameLerp ? 1 : 0));
 	}
 	
 	FVertexFactoryType FGPUSkinVertexFactory::StaticType(
-		TEXT("InstancedSkinVertexFactory"),
-		TEXT("/Plugin/SkinnedInstancing/Private/InstancedSkinVertexFactory.ush"),
+		TEXT("SkinnedInstancingVertexFactory"),
+		TEXT("/Plugin/SkinnedInstancing/Private/SkinnedInstancingVertexFactory.ush"),
 		/*bool bInUsedWithMaterials =*/ true,
 		/*bool bInSupportsStaticLighting =*/ false,
 		/*bool bInSupportsDynamicLighting =*/ true,
@@ -493,7 +493,7 @@ namespace
 	}
 }
 
-class FInstancedSkinnedMeshObject : public FDeferredCleanupInterface
+class FSIMeshObject : public FDeferredCleanupInterface
 {
 public:
 	class FDynamicData
@@ -506,11 +506,11 @@ public:
 			InstanceDatas.Reset();
 		}
 	public:
-		TArray<FInstancedSkinnedMeshInstanceData> InstanceDatas;
+		TArray<FSIMeshInstanceData> InstanceDatas;
 	};
 public:
-	FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh, ERHIFeatureLevel::Type FeatureLevel);
-	virtual ~FInstancedSkinnedMeshObject();
+	FSIMeshObject(USkeletalMesh* SkeletalMesh, ERHIFeatureLevel::Type FeatureLevel);
+	virtual ~FSIMeshObject();
 public:
 	virtual void ReleaseResources();
 	FGPUSkinVertexFactory* GetSkinVertexFactory(int32 LODIndex, int32 ChunkIdx) const;
@@ -531,10 +531,10 @@ private:
 	TArray<FSkeletalMeshObjectLOD> LODs;
 	FDynamicData* DynamicData;
 public:
-	TArray<TArray<FInstancedSkinnedMeshInstanceData>> TempLODInstanceDatas;
+	TArray<TArray<FSIMeshInstanceData>> TempLODInstanceDatas;
 };
 
-struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
+struct FSIMeshObject::FSkeletalMeshObjectLOD
 {
 	void InitResources(FSkeletalMeshLODRenderData& LODData, ERHIFeatureLevel::Type InFeatureLevel)
 	{
@@ -592,14 +592,14 @@ struct FInstancedSkinnedMeshObject::FSkeletalMeshObjectLOD
 
 namespace
 {
-	TArray<FInstancedSkinnedMeshObject::FDynamicData*> FreeDynamicDatas;
+	TArray<FSIMeshObject::FDynamicData*> FreeDynamicDatas;
 	FCriticalSection FreeDynamicDatasCriticalSection;
 	int32 GMinPoolCount = 0;
 	int32 GAllocationCounter = 0;
 	const int32 GAllocationsBeforeCleanup = 1000; // number of allocations we make before we clean up the pool, this number is increased when we have to allocate not from the pool
 }
 
-FInstancedSkinnedMeshObject::FDynamicData * FInstancedSkinnedMeshObject::FDynamicData::Alloc()
+FSIMeshObject::FDynamicData * FSIMeshObject::FDynamicData::Alloc()
 {
 	FScopeLock S(&FreeDynamicDatasCriticalSection);
 	++GAllocationCounter;
@@ -616,7 +616,7 @@ FInstancedSkinnedMeshObject::FDynamicData * FInstancedSkinnedMeshObject::FDynami
 	}
 }
 
-void FInstancedSkinnedMeshObject::FDynamicData::Free(FDynamicData * Who)
+void FSIMeshObject::FDynamicData::Free(FDynamicData * Who)
 {
 	Who->Clear();
 	FScopeLock S(&FreeDynamicDatasCriticalSection);
@@ -633,7 +633,7 @@ void FInstancedSkinnedMeshObject::FDynamicData::Free(FDynamicData * Who)
 	}
 }
 
-FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* SkeletalMesh,
+FSIMeshObject::FSIMeshObject(USkeletalMesh* SkeletalMesh,
 	ERHIFeatureLevel::Type FeatureLevel)
 	: FeatureLevel(FeatureLevel)
 	, SkeletalMesh(SkeletalMesh)
@@ -656,11 +656,11 @@ FInstancedSkinnedMeshObject::FInstancedSkinnedMeshObject(USkeletalMesh* Skeletal
 	}
 }
 
-FInstancedSkinnedMeshObject::~FInstancedSkinnedMeshObject()
+FSIMeshObject::~FSIMeshObject()
 {
 }
 
-void FInstancedSkinnedMeshObject::ReleaseResources()
+void FSIMeshObject::ReleaseResources()
 {
 	for (int32 LODIndex = 0; LODIndex < LODs.Num(); LODIndex++)
 	{
@@ -668,7 +668,7 @@ void FInstancedSkinnedMeshObject::ReleaseResources()
 	}
 }
 
-FGPUSkinVertexFactory* FInstancedSkinnedMeshObject::GetSkinVertexFactory(int32 LODIndex, int32 ChunkIdx) const
+FGPUSkinVertexFactory* FSIMeshObject::GetSkinVertexFactory(int32 LODIndex, int32 ChunkIdx) const
 {
 	checkSlow(LODs.IsValidIndex(LODIndex));
 
@@ -678,7 +678,7 @@ FGPUSkinVertexFactory* FInstancedSkinnedMeshObject::GetSkinVertexFactory(int32 L
 	return LOD.VertexFactories[ChunkIdx].Get();
 }
 
-void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset, UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer)
+void FSIMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset, UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer)
 {
 	FCompactPose OutPose;
 	FBlendedCurve OutCurve;
@@ -736,10 +736,10 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, 
 	}
 }
 
-void FInstancedSkinnedMeshObject::UpdateBoneData(const FSIAnimationData* AnimationData)
+void FSIMeshObject::UpdateBoneData(const FSIAnimationData* AnimationData)
 {
 	// queue a call to update this data
-	ENQUEUE_RENDER_COMMAND(InstancedSkinnedMeshObjectUpdateDataCommand)(
+	ENQUEUE_RENDER_COMMAND(SIMeshObjectUpdateDataCommand)(
 		[this, AnimationData](FRHICommandListImmediate& RHICmdList)
 	{
 		UpdateBoneData_RenderThread(AnimationData);
@@ -747,7 +747,7 @@ void FInstancedSkinnedMeshObject::UpdateBoneData(const FSIAnimationData* Animati
 	);
 }
 
-void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread(const FSIAnimationData* AnimationData)
+void FSIMeshObject::UpdateBoneData_RenderThread(const FSIAnimationData* AnimationData)
 {
 	for (int32 LODIndex = 0; LODIndex < SkeletalMeshRenderData->LODRenderData.Num(); LODIndex++)
 	{
@@ -772,10 +772,10 @@ void FInstancedSkinnedMeshObject::UpdateBoneData_RenderThread(const FSIAnimation
 	}
 }
 
-void FInstancedSkinnedMeshObject::UpdateDynamicData(FDynamicData * NewDynamicData)
+void FSIMeshObject::UpdateDynamicData(FDynamicData * NewDynamicData)
 {
 	// queue a call to update this data
-	ENQUEUE_RENDER_COMMAND(InstancedSkinnedMeshObjectUpdateDataCommand)(
+	ENQUEUE_RENDER_COMMAND(SIMeshObjectUpdateDataCommand)(
 		[this, NewDynamicData](FRHICommandListImmediate& RHICmdList)
 	{
 		UpdateDynamicData_RenderThread(NewDynamicData);
@@ -783,19 +783,19 @@ void FInstancedSkinnedMeshObject::UpdateDynamicData(FDynamicData * NewDynamicDat
 	);
 }
 
-void FInstancedSkinnedMeshObject::UpdateDynamicData_RenderThread(FDynamicData * NewDynamicData)
+void FSIMeshObject::UpdateDynamicData_RenderThread(FDynamicData * NewDynamicData)
 {
 	if (DynamicData)
 		FDynamicData::Free(DynamicData);
 	DynamicData = NewDynamicData;
 }
 
-class FInstancedSkinnedMeshSceneProxy final : public FPrimitiveSceneProxy
+class FSIMeshSceneProxy final : public FPrimitiveSceneProxy
 {
 public:
-	FInstancedSkinnedMeshSceneProxy(USIMeshComponent* Component, 
-		USkeletalMesh* SkeletalMesh, FInstancedSkinnedMeshObject* MeshObject);
-	virtual ~FInstancedSkinnedMeshSceneProxy();
+	FSIMeshSceneProxy(USIMeshComponent* Component, 
+		USkeletalMesh* SkeletalMesh, FSIMeshObject* MeshObject);
+	virtual ~FSIMeshSceneProxy();
 
 	
 public: // override
@@ -825,7 +825,7 @@ public: // override
 
 private:
 	void GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
-		int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData, int32 MaxNumInstances) const;
+		int LODIndex, const TArray< FSIMeshInstanceData>& InstanceData, int32 MaxNumInstances) const;
 
 private:
 	USIMeshComponent* Component;
@@ -833,12 +833,12 @@ private:
 	FMaterialRelevance MaterialRelevance;
 	TEnumAsByte<ERHIFeatureLevel::Type> FeatureLevel;
 	class USkeletalMesh* SkeletalMesh;
-	class FInstancedSkinnedMeshObject* MeshObject;
+	class FSIMeshObject* MeshObject;
 	FSkeletalMeshRenderData* SkeletalMeshRenderData;
 };
 
-FInstancedSkinnedMeshSceneProxy::FInstancedSkinnedMeshSceneProxy(USIMeshComponent * Component,
-	USkeletalMesh* SkeletalMesh, FInstancedSkinnedMeshObject* MeshObject)
+FSIMeshSceneProxy::FSIMeshSceneProxy(USIMeshComponent * Component,
+	USkeletalMesh* SkeletalMesh, FSIMeshObject* MeshObject)
 	: FPrimitiveSceneProxy(Component, Component->SkeletalMesh->GetFName())
 	, Component(Component)
 	, BodySetup(Component->GetBodySetup())
@@ -850,12 +850,12 @@ FInstancedSkinnedMeshSceneProxy::FInstancedSkinnedMeshSceneProxy(USIMeshComponen
 {
 }
 
-FInstancedSkinnedMeshSceneProxy::~FInstancedSkinnedMeshSceneProxy()
+FSIMeshSceneProxy::~FSIMeshSceneProxy()
 {
 }
 
-void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
-	int LODIndex, const TArray< FInstancedSkinnedMeshInstanceData>& InstanceData, int32 MaxNumInstances) const
+void FSIMeshSceneProxy::GetDynamicMeshElementsByLOD(FMeshElementCollector & Collector, int32 ViewIndex, const FEngineShowFlags& EngineShowFlags,
+	int LODIndex, const TArray< FSIMeshInstanceData>& InstanceData, int32 MaxNumInstances) const
 {
 	const FSkeletalMeshLODRenderData& LODData = SkeletalMeshRenderData->LODRenderData[LODIndex];
 
@@ -969,7 +969,7 @@ int32 GetMinDesiredLODLevel(USkeletalMesh* SkeletalMesh, const FSceneView* View,
 	return NewLODLevel;
 }
 
-void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views,
+void FSIMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Views,
 	const FSceneViewFamily & ViewFamily, uint32 VisibilityMap, FMeshElementCollector & Collector) const
 {
 	if (!MeshObject)
@@ -1014,7 +1014,7 @@ void FInstancedSkinnedMeshSceneProxy::GetDynamicMeshElements(const TArray<const 
 	}
 }
 
-FPrimitiveViewRelevance FInstancedSkinnedMeshSceneProxy::GetViewRelevance(const FSceneView * View) const
+FPrimitiveViewRelevance FSIMeshSceneProxy::GetViewRelevance(const FSceneView * View) const
 {
 	FPrimitiveViewRelevance Result;
 	Result.bDrawRelevance = IsShown(View);
@@ -1029,7 +1029,7 @@ FPrimitiveViewRelevance FInstancedSkinnedMeshSceneProxy::GetViewRelevance(const 
 	return Result;
 }
 
-void FInstancedSkinnedMeshSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInterface* PDI)
+void FSIMeshSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInterface* PDI)
 {
 }
 
@@ -1049,13 +1049,13 @@ USIMeshComponent::USIMeshComponent(const FObjectInitializer& ObjectInitializer)
 
 FPrimitiveSceneProxy* USIMeshComponent::CreateSceneProxy()
 {
-	FInstancedSkinnedMeshSceneProxy* Result = nullptr;
+	FSIMeshSceneProxy* Result = nullptr;
 	FSkeletalMeshRenderData* SkelMeshRenderData = SkeletalMesh ? SkeletalMesh->GetResourceForRendering() : nullptr;
 
 	// Only create a scene proxy for rendering if properly initialized
 	if (SkelMeshRenderData)
 	{
-		Result = ::new FInstancedSkinnedMeshSceneProxy(this, SkeletalMesh, MeshObject);
+		Result = ::new FSIMeshSceneProxy(this, SkeletalMesh, MeshObject);
 	}
 
 	return Result;
@@ -1122,7 +1122,7 @@ void USIMeshComponent::CreateRenderState_Concurrent()
 		// No need to create the mesh object if we aren't actually rendering anything (see UPrimitiveComponent::Attach)
 		if (FApp::CanEverRender() && ShouldComponentAddToScene())
 		{
-			MeshObject = ::new FInstancedSkinnedMeshObject(SkeletalMesh, SceneFeatureLevel);
+			MeshObject = ::new FSIMeshObject(SkeletalMesh, SceneFeatureLevel);
 
 			MeshObject->UpdateBoneData(AnimationComponent->GetAnimationData());
 		}
@@ -1161,7 +1161,7 @@ void USIMeshComponent::UpdateMeshObejctDynamicData()
 {
 	if (MeshObject)
 	{
-		auto DynamicData = FInstancedSkinnedMeshObject::FDynamicData::Alloc();
+		auto DynamicData = FSIMeshObject::FDynamicData::Alloc();
 		DynamicData->InstanceDatas.Reserve(PerInstanceSMData.Num());
 		for (auto Pair : PerInstanceSMData)
 			DynamicData->InstanceDatas.Add(Pair.Value);
@@ -1172,7 +1172,7 @@ void USIMeshComponent::UpdateMeshObejctDynamicData()
 int32 USIMeshComponent::AddInstance(const FTransform & Transform)
 {
 	int Id = ++InstanceIdIncrease;
-	FInstancedSkinnedMeshInstanceData NewInstanceData;
+	FSIMeshInstanceData NewInstanceData;
 
 	NewInstanceData.Transform = Transform.ToMatrixWithScale();
 	NewInstanceData.AnimDatas[0] = { 0, 0, 0, 0, 1 };
@@ -1201,7 +1201,7 @@ UAnimSequence * USIMeshComponent::GetSequence(int Id)
 	return nullptr;
 }
 
-FInstancedSkinnedMeshInstanceData* USIMeshComponent::GetInstanceData(int Id)
+FSIMeshInstanceData* USIMeshComponent::GetInstanceData(int Id)
 {
 	return PerInstanceSMData.Find(Id);
 }

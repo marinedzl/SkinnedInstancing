@@ -1,15 +1,15 @@
 #include "/Engine/Public/Platform.ush"
 
-#ifndef INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES
-#define INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES 0 // default is 4 bones
+#ifndef SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES
+#define SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES 0 // default is 4 bones
 #endif
 
-#ifndef INSTANCED_SKIN_DISABLE_ANIMATION_BLEND
-#define INSTANCED_SKIN_DISABLE_ANIMATION_BLEND 0 // default is enable
+#ifndef SKINNED_INSTANCING_DISABLE_ANIMATION_BLEND
+#define SKINNED_INSTANCING_DISABLE_ANIMATION_BLEND 0 // default is enable
 #endif
 
-#ifndef INSTANCED_SKIN_DISABLE_FRAME_LERP
-#define INSTANCED_SKIN_DISABLE_FRAME_LERP 0 // default is enable
+#ifndef SKINNED_INSTANCING_DISABLE_FRAME_LERP
+#define SKINNED_INSTANCING_DISABLE_FRAME_LERP 0 // default is enable
 #endif
 
 struct FVertexFactoryInput
@@ -132,7 +132,7 @@ FBoneMatrix GetBoneMatrixByInstanceAnimation(int InstanceId, int Layer, int Bone
 	int Index = InstanceId * 8 + Layer * 4;
 	int PrevFrame = InstanceAnimations[Index + 0];
 	
-#if !INSTANCED_SKIN_DISABLE_ANIMATION_BLEND
+#if !SKINNED_INSTANCING_DISABLE_ANIMATION_BLEND
 	float BlendWeight = InstanceAnimations[Index + 3] * 0.001f;
 #else
 	float BlendWeight = 1;
@@ -142,7 +142,7 @@ FBoneMatrix GetBoneMatrixByInstanceAnimation(int InstanceId, int Layer, int Bone
 	
 	FBoneMatrix Prev = mul(GetBoneMatrixFromBuffer(PrevFrame + BoneMap[BoneId]), InvMatrix);
 	
-#if !INSTANCED_SKIN_DISABLE_FRAME_LERP
+#if !SKINNED_INSTANCING_DISABLE_FRAME_LERP
 	int NextFrame = InstanceAnimations[Index + 1];
 	float FrameLerp = InstanceAnimations[Index + 2] * 0.001f;
 	FBoneMatrix Next = mul(GetBoneMatrixFromBuffer(NextFrame + BoneMap[BoneId]), InvMatrix);
@@ -155,7 +155,7 @@ FBoneMatrix GetBoneMatrixByInstanceAnimation(int InstanceId, int Layer, int Bone
 FBoneMatrix GetBoneMatrix(int InstanceId, int BoneId)
 {
 	FBoneMatrix M = GetBoneMatrixByInstanceAnimation(InstanceId, 0, BoneId);
-#if !INSTANCED_SKIN_DISABLE_ANIMATION_BLEND
+#if !SKINNED_INSTANCING_DISABLE_ANIMATION_BLEND
 	M += GetBoneMatrixByInstanceAnimation(InstanceId, 1, BoneId);
 #endif
 	return M;
@@ -224,7 +224,7 @@ FBoneMatrix CalcBoneMatrix( FVertexFactoryInput Input )
 #endif
 	FBoneMatrix BoneMatrix = Input.BlendWeights.x * GetBoneMatrix(InstanceId, Input.BlendIndices.x);
 	BoneMatrix += Input.BlendWeights.y * GetBoneMatrix(InstanceId, Input.BlendIndices.y);
-#if !INSTANCED_SKIN_LIMIT_2BONE_INFLUENCES
+#if !SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES
 	BoneMatrix += Input.BlendWeights.z * GetBoneMatrix(InstanceId, Input.BlendIndices.z);
 	BoneMatrix += Input.BlendWeights.w * GetBoneMatrix(InstanceId, Input.BlendIndices.w);
 #endif
