@@ -10,7 +10,7 @@ class SKINNEDINSTANCING_API USIUnitComponent : public USceneComponent
 	GENERATED_UCLASS_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instances")
-	TWeakObjectPtr<AActor> InstanceManagerObject;
+	TWeakObjectPtr<USIMeshComponent> MeshComponent;
 
 public:
 	virtual ~USIUnitComponent();

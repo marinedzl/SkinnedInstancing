@@ -125,34 +125,22 @@ void USIUnitComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
-	if (InstanceId > 0 && InstanceManagerObject.IsValid())
+	if (InstanceId > 0 && MeshComponent.IsValid())
 	{
-		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
-			);
-		if (InstanceManager)
-		{
-			InstanceManager->RemoveInstance(InstanceId);
-		}
+		MeshComponent->RemoveInstance(InstanceId);
 	}
 }
 
 void USIUnitComponent::CrossFade(int Sequence, float FadeLength, bool Loop)
 {
-	if (InstanceManagerObject.IsValid())
+	if (MeshComponent.IsValid())
 	{
-		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
-			);
-		if (InstanceManager)
+		UAnimSequence* AnimSequence = MeshComponent->GetSequence(Sequence);
+		if (AnimSequence)
 		{
-			UAnimSequence* AnimSequence = InstanceManager->GetSequence(Sequence);
-			if (AnimSequence)
-			{
-				int NumFrames = AnimSequence->GetNumberOfFrames();
-				FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
-				AnimtionPlayer->CrossFade(Seq, Loop, FadeLength);
-			}
+			int NumFrames = AnimSequence->GetNumberOfFrames();
+			FAnimtionPlayer::Sequence Seq(Sequence, AnimSequence->SequenceLength, NumFrames);
+			AnimtionPlayer->CrossFade(Seq, Loop, FadeLength);
 		}
 	}
 }
@@ -162,45 +150,33 @@ void USIUnitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (InstanceId <= 0 && InstanceManagerObject.IsValid())
+	if (InstanceId <= 0 && MeshComponent.IsValid())
 	{
-		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
-			);
-		if (InstanceManager)
-		{
-			InstanceId = InstanceManager->AddInstance(GetComponentTransform());
-		}
+		InstanceId = MeshComponent->AddInstance(GetComponentTransform());
 	}
 
 	AnimtionPlayer->Tick(DeltaTime);
 
-	if (InstanceManagerObject.IsValid() && InstanceId > 0)
+	if (MeshComponent.IsValid() && InstanceId > 0)
 	{
-		USIMeshComponent* InstanceManager = Cast<USIMeshComponent>(
-			InstanceManagerObject->GetComponentByClass(USIMeshComponent::StaticClass())
-			);
-		if (InstanceManager)
+		FSIMeshInstanceData* Instance = MeshComponent->GetInstanceData(InstanceId);
+		check(Instance);
+		Instance->Transform = GetComponentTransform().ToMatrixWithScale();
+
+		GetInstanceDataFromPlayer(Instance->AnimDatas[0], AnimtionPlayer->GetCurrentSeq());
+		GetInstanceDataFromPlayer(Instance->AnimDatas[1], AnimtionPlayer->GetNextSeq());
+
+		float BlendWeight = 1;
+
+		if (AnimtionPlayer->GetCurrentSeq().Id != AnimtionPlayer->GetNextSeq().Id)
 		{
-			FSIMeshInstanceData* Instance = InstanceManager->GetInstanceData(InstanceId);
-			check(Instance);
-			Instance->Transform = GetComponentTransform().ToMatrixWithScale();
-
-			GetInstanceDataFromPlayer(Instance->AnimDatas[0], AnimtionPlayer->GetCurrentSeq());
-			GetInstanceDataFromPlayer(Instance->AnimDatas[1], AnimtionPlayer->GetNextSeq());
-
-			float BlendWeight = 1;
-
-			if (AnimtionPlayer->GetCurrentSeq().Id != AnimtionPlayer->GetNextSeq().Id)
-			{
-				float FadeTime = AnimtionPlayer->GetFadeTime();
-				float FadeLength = FMath::Max(AnimtionPlayer->GetFadeLength(), 0.001f);
-				BlendWeight = FadeTime / FadeLength;
-			}
-
-			Instance->AnimDatas[0].BlendWeight = BlendWeight;
-			Instance->AnimDatas[1].BlendWeight = 1 - BlendWeight;
+			float FadeTime = AnimtionPlayer->GetFadeTime();
+			float FadeLength = FMath::Max(AnimtionPlayer->GetFadeLength(), 0.001f);
+			BlendWeight = FadeTime / FadeLength;
 		}
+
+		Instance->AnimDatas[0].BlendWeight = BlendWeight;
+		Instance->AnimDatas[1].BlendWeight = 1 - BlendWeight;
 	}
 }
 
