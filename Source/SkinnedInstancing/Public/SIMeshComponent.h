@@ -57,10 +57,10 @@ protected:
 public:
 
 	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SkinnedInstancing")
 	USkeletalMesh* SkeletalMesh;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instances")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SkinnedInstancing")
 	TWeakObjectPtr<USIAnimationComponent> AnimationComponent;
 
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */

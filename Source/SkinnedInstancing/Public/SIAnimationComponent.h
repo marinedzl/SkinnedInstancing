@@ -14,14 +14,14 @@ class SKINNEDINSTANCING_API USIAnimationComponent : public USceneComponent
 	GENERATED_UCLASS_BODY()
 
 	/** The Skeleton used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SkinnedInstancing")
 	USkeleton* Skeleton;
 
 	/** The AnimSequence used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instances")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SkinnedInstancing")
 	TArray<UAnimSequence*> AnimSequences;
 
-	UFUNCTION(BlueprintCallable, Category = "Components|InstancedSkeletalMesh")
+	UFUNCTION(BlueprintCallable, Category = "Components|SkinnedInstancing")
 	UAnimSequence* GetSequence(int Id);
 
 public:
