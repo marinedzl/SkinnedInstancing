@@ -1,9 +1,13 @@
 #pragma once
 #include "CoreMinimal.h"
 
-class FSIAnimationData
+class FSIAnimationData : public FDeferredCleanupInterface
 {
 public:
+	FSIAnimationData();
+
+	virtual ~FSIAnimationData();
+
 	void Init(int InNumBones, const TArray<int>& InSequenceLength);
 
 	void Update(TArray<FMatrix>* ReferenceToLocalMatrices);

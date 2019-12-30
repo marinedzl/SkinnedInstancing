@@ -5,6 +5,14 @@
 
 #pragma optimize( "", off )
 
+FSIAnimationData::FSIAnimationData()
+{
+}
+
+FSIAnimationData::~FSIAnimationData()
+{
+}
+
 void FSIAnimationData::Release()
 {
 	ENQUEUE_RENDER_COMMAND(ReleaseSIAnimationData)(

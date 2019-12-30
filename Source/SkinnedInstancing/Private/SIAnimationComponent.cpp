@@ -10,6 +10,8 @@ USIAnimationComponent::USIAnimationComponent(const FObjectInitializer& ObjectIni
 	bAutoActivate = true;
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+
+	AnimationData = nullptr;
 }
 
 UAnimSequence * USIAnimationComponent::GetSequence(int Id)
@@ -21,7 +23,6 @@ UAnimSequence * USIAnimationComponent::GetSequence(int Id)
 
 USIAnimationComponent::~USIAnimationComponent()
 {
-	delete AnimationData;
 }
 
 void USIAnimationComponent::BeginPlay()
@@ -55,6 +56,10 @@ void USIAnimationComponent::DestroyRenderState_Concurrent()
 	if (AnimationData)
 	{
 		AnimationData->Release();
+
+		// Begin a deferred delete of MeshObject.  BeginCleanup will call MeshObject->FinishDestroy after the above release resource
+		// commands execute in the rendering thread.
+		BeginCleanup(AnimationData);
 		AnimationData = nullptr;
 	}
 }
