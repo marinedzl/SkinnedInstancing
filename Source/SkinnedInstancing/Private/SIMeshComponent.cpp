@@ -760,12 +760,20 @@ void FSIMeshObject::UpdateBoneData_RenderThread(const FSIAnimationData* Animatio
 
 			VertexFactory->GetShaderData().UpdateBoneData(AnimationData);
 
-			const TArray<FBoneIndexType>& BoneMap = Section.BoneMap;
+			TArray<FBoneIndexType> BoneMap;
+
+			for (int BoneIndex = 0; BoneIndex < Section.BoneMap.Num(); BoneIndex++)
+			{
+				FName BoneName = SkeletalMesh->RefSkeleton.GetBoneName(Section.BoneMap[BoneIndex]);
+				int NewBoneIndex = SkeletalMesh->Skeleton->GetReferenceSkeleton().FindBoneIndex(BoneName);
+				BoneMap.Add(NewBoneIndex);
+			}
+
 			VertexFactory->GetShaderData().UpdateBoneMap(BoneMap);
 
 			TArray<FMatrix> RefBasesInvMatrix;
-			for (int BoneIndex = 0; BoneIndex < BoneMap.Num(); BoneIndex++)
-				RefBasesInvMatrix.Add(SkeletalMesh->RefBasesInvMatrix[BoneMap[BoneIndex]]);
+			for (int BoneIndex = 0; BoneIndex < Section.BoneMap.Num(); BoneIndex++)
+				RefBasesInvMatrix.Add(SkeletalMesh->RefBasesInvMatrix[Section.BoneMap[BoneIndex]]);
 
 			VertexFactory->GetShaderData().UpdateRefBasesInvMatrix(RefBasesInvMatrix);
 		}
