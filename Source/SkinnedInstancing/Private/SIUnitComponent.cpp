@@ -116,18 +116,43 @@ USIUnitComponent::~USIUnitComponent()
 	delete AnimtionPlayer;
 }
 
-void USIUnitComponent::BeginPlay()
+void USIUnitComponent::CreateRenderState_Concurrent()
 {
-	Super::BeginPlay();
+	Super::CreateRenderState_Concurrent();
+	RecreateInstance();
 }
 
-void USIUnitComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void USIUnitComponent::SendRenderDynamicData_Concurrent()
 {
-	Super::EndPlay(EndPlayReason);
+	Super::SendRenderDynamicData_Concurrent();
+	RecreateInstance();
+}
 
-	if (InstanceId > 0 && MeshComponent.IsValid())
+void USIUnitComponent::DestroyRenderState_Concurrent()
+{
+	Super::DestroyRenderState_Concurrent();
+	RemoveInstance();
+}
+
+void USIUnitComponent::RecreateInstance()
+{
+	RemoveInstance();
+
+	if (MeshComponent.IsValid())
 	{
-		MeshComponent->RemoveInstance(InstanceId);
+		InstanceId = MeshComponent->AddInstance(GetComponentTransform());
+	}
+}
+
+void USIUnitComponent::RemoveInstance()
+{
+	if (InstanceId > 0)
+	{
+		if (MeshComponent.IsValid())
+		{
+			MeshComponent->RemoveInstance(InstanceId);
+		}
+		InstanceId = 0;
 	}
 }
 
@@ -145,15 +170,20 @@ void USIUnitComponent::CrossFade(int Sequence, float FadeLength, bool Loop)
 	}
 }
 
+void USIUnitComponent::SetMeshComponent(USIMeshComponent * _MeshComponent)
+{
+	MeshComponent.Reset();
+	MeshComponent = _MeshComponent;
+	RecreateInstance();
+}
+
 void USIUnitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
 {
 	// Tick ActorComponent first.
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (InstanceId <= 0 && MeshComponent.IsValid())
-	{
-		InstanceId = MeshComponent->AddInstance(GetComponentTransform());
-	}
+	if (!AnimtionPlayer)
+		return;
 
 	AnimtionPlayer->Tick(DeltaTime);
 

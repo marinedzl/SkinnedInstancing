@@ -18,14 +18,22 @@ public:
 	//~ Override Functions
 protected:
 	//~ Begin UActorComponent Interface
-	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void CreateRenderState_Concurrent() override;
+	virtual void SendRenderDynamicData_Concurrent() override;
+	virtual void DestroyRenderState_Concurrent() override;
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;
 	//~ End UActorComponent Interface
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Components|SkinnedInstancing")
 	void CrossFade(int Sequence, float FadeLength, bool Loop);
+
+	UFUNCTION(BlueprintCallable, Category = "Components|SkinnedInstancing")
+	void SetMeshComponent(USIMeshComponent* _MeshComponent);
+
+private:
+	void RecreateInstance();
+	void RemoveInstance();
 
 public:
 	class FAnimtionPlayer;

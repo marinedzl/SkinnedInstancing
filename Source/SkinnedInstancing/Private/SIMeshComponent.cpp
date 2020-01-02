@@ -1157,6 +1157,13 @@ void USIMeshComponent::DestroyRenderState_Concurrent()
 	}
 }
 
+void USIMeshComponent::SetAnimationComponent(USIAnimationComponent * _AnimationComponent)
+{
+	AnimationComponent.Reset();
+	AnimationComponent = _AnimationComponent;
+	MarkRenderDynamicDataDirty();
+}
+
 void USIMeshComponent::UpdateMeshObejctDynamicData()
 {
 	if (MeshObject)

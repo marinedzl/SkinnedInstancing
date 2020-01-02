@@ -66,6 +66,9 @@ public:
 	/** Object responsible for sending bone transforms, morph target state etc. to render thread. */
 	class FSIMeshObject* MeshObject;
 
+	UFUNCTION(BlueprintCallable, Category = "Components|SkinnedInstancing")
+	void SetAnimationComponent(USIAnimationComponent* _AnimationComponent);
+
 private:
 	void UpdateMeshObejctDynamicData();
 
