@@ -57,7 +57,7 @@ protected:
 public:
 
 	/** The skeletal mesh used by this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SkinnedInstancing")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SkinnedInstancing")
 	USkeletalMesh* SkeletalMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SkinnedInstancing")
