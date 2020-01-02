@@ -518,8 +518,6 @@ public:
 	const FDynamicData* GetDynamicData() const { return DynamicData; }
 	void UpdateDynamicData(FDynamicData* NewDynamicData);
 private:
-	void UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset,
-		UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer);
 	void UpdateDynamicData_RenderThread(FDynamicData* NewDynamicData);
 	void UpdateBoneData_RenderThread(const FSIAnimationData* AnimationData);
 private:
@@ -676,64 +674,6 @@ FGPUSkinVertexFactory* FSIMeshObject::GetSkinVertexFactory(int32 LODIndex, int32
 
 	// use the default gpu skin vertex factory
 	return LOD.VertexFactories[ChunkIdx].Get();
-}
-
-void FSIMeshObject::UpdateBoneData(TArray<FMatrix>& BoneMatrices, int SequenceOffset, UAnimSequence* AnimSequence, const FBoneContainer* BoneContainer)
-{
-	FCompactPose OutPose;
-	FBlendedCurve OutCurve;
-	OutPose.SetBoneContainer(BoneContainer);
-	OutPose.ResetToRefPose();
-
-	const FReferenceSkeleton& RefSkeleton = BoneContainer->GetReferenceSkeleton();
-
-	int NumBones = RefSkeleton.GetRawBoneNum();
-	int NumFrames = AnimSequence->GetNumberOfFrames();
-	float Interval = (NumFrames > 1) ? (AnimSequence->SequenceLength / (NumFrames - 1)) : MINIMUM_ANIMATION_LENGTH;
-
-	check(NumFrames > 0);
-
-	for (int FrameIndex = 0; FrameIndex < NumFrames; FrameIndex++)
-	{
-		float Time = FrameIndex * Interval;
-		AnimSequence->GetBonePose(/*out*/ OutPose, /*out*/OutCurve, FAnimExtractContext(Time));
-
-		TArray<FTransform> ComponentSpaceTransforms;
-
-		ComponentSpaceTransforms.AddUninitialized(NumBones);
-
-		auto& LocalTransform = OutPose.GetBones();
-
-		check(LocalTransform.Num() == ComponentSpaceTransforms.Num());
-
-		const FTransform* LocalTransformsData = LocalTransform.GetData();
-		FTransform* ComponentSpaceData = ComponentSpaceTransforms.GetData();
-
-		ComponentSpaceTransforms[0] = LocalTransform[0];
-
-		for (int32 BoneIndex = 1; BoneIndex < LocalTransform.Num(); BoneIndex++)
-		{
-			// For all bones below the root, final component-space transform is relative transform * component-space transform of parent.
-			const int32 ParentIndex = RefSkeleton.GetParentIndex(BoneIndex);
-			FTransform* ParentSpaceBase = ComponentSpaceData + ParentIndex;
-			FPlatformMisc::Prefetch(ParentSpaceBase);
-
-			FTransform* SpaceBase = ComponentSpaceData + BoneIndex;
-
-			FTransform::Multiply(SpaceBase, LocalTransformsData + BoneIndex, ParentSpaceBase);
-
-			SpaceBase->NormalizeRotation();
-
-			checkSlow(SpaceBase->IsRotationNormalized());
-			checkSlow(!SpaceBase->ContainsNaN());
-		}
-
-		for (int BoneIndex = 0; BoneIndex < NumBones; BoneIndex++)
-		{
-			int PoseDataOffset = SequenceOffset + NumBones * FrameIndex + BoneIndex;
-			BoneMatrices[PoseDataOffset] = ComponentSpaceTransforms[BoneIndex].ToMatrixWithScale();
-		}
-	}
 }
 
 void FSIMeshObject::UpdateBoneData(const FSIAnimationData* AnimationData)
