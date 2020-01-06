@@ -164,8 +164,12 @@ void USIAnimationComponent::CreateAnimationData()
 	int SequenceOffset = 0;
 	for (int i = 0; i < AnimSequencesExist.Num(); i++)
 	{
+		FName SavedRetargetSource = AnimSequencesExist[i]->RetargetSource;
+		if (RetargetSource.IsValid())
+			AnimSequencesExist[i]->RetargetSource = RetargetSource;
 		UpdateBoneData(*BoneMatrices, SequenceOffset, AnimSequencesExist[i], &BoneContainer);
 		SequenceOffset += AnimSequencesExist[i]->GetNumberOfFrames() * NumBones;
+		AnimSequencesExist[i]->RetargetSource = SavedRetargetSource;
 	}
 
 	AnimationData->Update(BoneMatrices);

@@ -21,6 +21,10 @@ class SKINNEDINSTANCING_API USIAnimationComponent : public USceneComponent
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SkinnedInstancing")
 	TArray<UAnimSequence*> AnimSequences;
 
+	/** Base pose to use when retargeting */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SkinnedInstancing")
+	FName RetargetSource;
+
 	UFUNCTION(BlueprintCallable, Category = "Components|SkinnedInstancing")
 	UAnimSequence* GetSequence(int Id);
 
