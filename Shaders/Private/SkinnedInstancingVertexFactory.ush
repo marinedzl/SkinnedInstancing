@@ -1,7 +1,7 @@
 #include "/Engine/Public/Platform.ush"
 
 #ifndef SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES
-#define SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES 0 // default is 4 bones
+#define SKINNED_INSTANCING_LIMIT_2BONE_INFLUENCES 1 // default is 2 bones
 #endif
 
 #ifndef SKINNED_INSTANCING_DISABLE_ANIMATION_BLEND

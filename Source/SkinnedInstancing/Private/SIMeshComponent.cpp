@@ -13,7 +13,7 @@ namespace
 {
 	static TAutoConsoleVariable<int32> CVarSkinnedInstancingLimit2BoneInfluences(
 		TEXT("r.SkinnedInstancing.Limit2BoneInfluences"),
-		0,
+		1,
 		TEXT("Whether to use 2 bones influence instead of default 4 for GPU skinning. Cannot be changed at runtime."),
 		ECVF_ReadOnly);
 
